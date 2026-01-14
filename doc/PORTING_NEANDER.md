@@ -65,53 +65,110 @@ cd lcc
 
 ## Understanding the NEANDER-X Architecture
 
-The NEANDER-X is an 8-bit educational processor with these characteristics:
+The NEANDER-X is an 8-bit educational processor designed with C compiler support in mind. It extends the original NEANDER with features specifically chosen to enable efficient C code generation.
 
 ### Registers
 
 | Register | Size | Description |
 |----------|------|-------------|
 | AC | 8-bit | Accumulator - main computation register |
-| X | 8-bit | Index register |
-| Y | 8-bit | Index register / MUL high byte |
+| X | 8-bit | Index register - array access, expression temporary |
+| Y | 8-bit | Index register - MUL high byte, DIV remainder, expression temporary |
 | PC | 16-bit | Program counter |
-| SP | 16-bit | Stack pointer |
-| FP | 16-bit | Frame pointer |
+| SP | 16-bit | Stack pointer (grows downward) |
+| FP | 16-bit | Frame pointer - essential for C stack frames |
 
 ### Condition Flags
 
-- **N** (Negative): Set when result is negative
+- **N** (Negative): Set when result is negative (sign bit = 1)
 - **Z** (Zero): Set when result is zero
-- **C** (Carry): Set on carry/borrow
+- **C** (Carry): Set on carry/borrow - used for multi-byte arithmetic and unsigned comparisons
 
 ### Key Instructions
 
-```
-LDA addr    ; Load AC from memory
-STA addr    ; Store AC to memory
-LDI imm     ; Load immediate to AC
-ADD addr    ; AC = AC + mem[addr]
-SUB addr    ; AC = AC - mem[addr]
-AND/OR/XOR  ; Bitwise operations
-MUL         ; AC * X -> AC (low), Y (high)
-DIV/MOD     ; Division and modulo
-PUSH/POP    ; Stack operations
-CALL/RET    ; Subroutine calls
-JMP/JZ/JN   ; Jumps and branches
+```assembly
+; Memory Access
+LDA addr        ; Load AC from memory
+STA addr        ; Store AC to memory
+LDI imm         ; Load immediate to AC
+
+; Indexed Addressing (critical for arrays and stack frames)
+LDA addr,X      ; Load AC from memory[addr + X]
+STA addr,X      ; Store AC to memory[addr + X]
+LDA addr,Y      ; Load AC from memory[addr + Y]
+STA addr,Y      ; Store AC to memory[addr + Y]
+LDA addr,FP     ; Load AC from memory[addr + FP] - local variables!
+STA addr,FP     ; Store AC to memory[addr + FP] - local variables!
+
+; Register Transfers
+TAX / TXA       ; Transfer AC <-> X
+TAY / TYA       ; Transfer AC <-> Y
+LDXI imm        ; Load immediate to X
+LDYI imm        ; Load immediate to Y
+INX / INY       ; Increment X / Y
+
+; Arithmetic with Carry (for multi-byte operations)
+ADD addr        ; AC = AC + mem[addr]
+SUB addr        ; AC = AC - mem[addr]
+ADC addr        ; AC = AC + mem[addr] + Carry
+SBC addr        ; AC = AC - mem[addr] - Carry
+INC / DEC       ; Increment / Decrement AC
+NEG             ; AC = -AC (two's complement)
+
+; Hardware Multiply/Divide
+MUL             ; Y:AC = AC * X (16-bit result!)
+DIV             ; AC = AC / X (quotient), Y = remainder
+MOD             ; AC = AC % X (remainder), Y = quotient
+
+; Bitwise Operations
+AND/OR/XOR addr ; Bitwise with memory
+NOT             ; AC = ~AC
+SHL / SHR / ASR ; Shift left / logical right / arithmetic right
+
+; Comparison
+CMP addr        ; Compare AC with memory (sets N, Z, C flags)
+
+; Jumps (using NEANDER-X extended jump set)
+JMP addr        ; Unconditional jump
+JZ / JNZ addr   ; Jump if Zero / Not Zero
+JN addr         ; Jump if Negative
+JC / JNC addr   ; Jump if Carry / No Carry (unsigned comparisons)
+JLE / JGT addr  ; Jump if Less/Equal or Greater (signed)
+JGE addr        ; Jump if Greater or Equal (signed)
+JBE / JA addr   ; Jump if Below/Equal or Above (unsigned)
+
+; Stack and Subroutines
+PUSH / POP      ; Push/Pop AC to/from stack
+PUSH_FP / POP_FP; Push/Pop Frame Pointer
+TSF / TFS       ; Transfer SP to FP / FP to SP
+CALL addr       ; Call subroutine (pushes 16-bit return address)
+RET             ; Return from subroutine
 ```
 
 ### Memory Model
 
 - 16-bit address space (64KB via SPI SRAM)
 - 8-bit data bus
-- Stack grows downward
+- Stack grows downward (SP decrements on push)
+- Little-endian byte order
 
-### Challenges for C Compilation
+### Why NEANDER-X is Good for C Compilation
 
-1. **Single Accumulator**: Only one main register for computation
-2. **8-bit Native Size**: C promotes to int (typically 32-bit)
-3. **Limited Addressing Modes**: No complex addressing
-4. **No Hardware Multiply for Large Types**: Multi-byte operations need software
+Unlike the original NEANDER (which only had AC), NEANDER-X was specifically extended for C:
+
+1. **Frame Pointer (FP)**: Enables standard C calling conventions with local variables at fixed offsets from FP
+2. **Indexed Addressing**: `LDA addr,FP` provides efficient access to function parameters and locals
+3. **X and Y Registers**: Serve as expression temporaries, reducing memory traffic
+4. **Hardware MUL/DIV**: No need for slow software multiplication routines
+5. **ADC/SBC**: Enable multi-byte (16-bit, 32-bit) arithmetic with carry propagation
+6. **Rich Comparison Jumps**: Full set of signed and unsigned conditional branches
+7. **CMP Instruction**: Sets all flags without modifying AC, enabling efficient comparisons
+
+### Remaining Challenges
+
+1. **C Type Promotion**: C promotes `char` to `int` for arithmetic - the backend must handle this
+2. **Limited Registers**: While X and Y help, complex expressions still need stack/memory temps
+3. **8-bit Native Width**: 16/32-bit operations require multiple instructions
 
 ---
 
@@ -532,47 +589,65 @@ reg: INDIRI1(addr)  "    LDA %0\n"  2
 reg: INDIRU1(addr)  "    LDA %0\n"  2
 reg: INDIRI4(addr)  "    LDA %0\n"  2
 
-/* Load from frame pointer offset */
-reg: INDIRI1(ADDRFP2)  "    LDA_FP %a\n"  2
-reg: INDIRI1(ADDRLP2)  "    LDA_FP %a\n"  2
+/* Load from frame pointer offset (for parameters and locals)
+ * Uses NEANDER-X indexed addressing: LDA offset,FP
+ */
+reg: INDIRI1(ADDRFP2)  "    LDA %a,FP\n"  2
+reg: INDIRI1(ADDRLP2)  "    LDA %a,FP\n"  2
 
 /* Store to memory */
 stmt: ASGNI1(addr,reg)  "    STA %0\n"  2
 stmt: ASGNU1(addr,reg)  "    STA %0\n"  2
 
 /* Store to frame pointer offset */
-stmt: ASGNI1(ADDRFP2,reg)  "    STA_FP %a\n"  2
-stmt: ASGNI1(ADDRLP2,reg)  "    STA_FP %a\n"  2
+stmt: ASGNI1(ADDRFP2,reg)  "    STA %a,FP\n"  2
+stmt: ASGNI1(ADDRLP2,reg)  "    STA %a,FP\n"  2
+
+/* Array access using X register: array[index]
+ * Pattern matches: INDIR(ADD(base_addr, index_reg))
+ */
+reg: INDIRI1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+stmt: ASGNI1(ADDI2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
 ```
 
 ### Arithmetic Rules
 
-```
-/* Addition: reg + reg */
-reg: ADDI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
-reg: ADDU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
-reg: ADDI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
+The key insight for NEANDER-X is using the X and Y registers as temporaries during binary operations. When LCC evaluates `a + b`, the left operand is pushed to the stack, then the right operand is computed into AC. Our rules save AC to X, pop the left operand, then perform the operation.
 
-/* Addition with memory operand (more efficient) */
+```
+/* Addition: reg + reg
+ * Right operand in AC, left on stack
+ * Strategy: Save right to X temp, pop left, add from temp
+ */
+reg: ADDI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
+reg: ADDU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
+
+/* Addition with memory operand (most efficient - direct memory access) */
 reg: ADDI1(reg,INDIRI1(addr))  "    ADD %1\n"  2
 
-/* Increment (special case for +1) */
+/* Increment (special case for +1 uses dedicated INC instruction) */
 conN: CNSTI1  "%a"  range(a, 1, 1)
 reg: ADDI1(reg,conN)  "    INC\n"  1
 
-/* Subtraction */
-reg: SUBI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
+/* Subtraction needs care: left - right, but right is in AC */
+reg: SUBI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    STA _tmp2\n    LDA _tmp\n    SUB _tmp2\n"  6
 reg: SUBI1(reg,INDIRI1(addr))  "    SUB %1\n"  2
 reg: SUBI1(reg,conN)  "    DEC\n"  1
 
-/* Multiplication */
-reg: MULI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MUL\n"  5
+/* Multiplication: Uses hardware MUL instruction
+ * MUL computes AC * X -> Y:AC (16-bit result)
+ * Right operand goes to X, left to AC
+ */
+reg: MULI1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
 
-/* Division and Modulo */
-reg: DIVI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    DIV\n"  5
-reg: MODI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MOD\n"  5
+/* Division and Modulo: Uses hardware DIV/MOD
+ * DIV: AC / X -> AC (quotient), Y (remainder)
+ * MOD: AC % X -> AC (remainder), Y (quotient)
+ */
+reg: DIVI1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
+reg: MODI1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
 
-/* Negation */
+/* Negation: Two's complement using dedicated NEG instruction */
 reg: NEGI1(reg)  "    NEG\n"  1
 ```
 
@@ -608,6 +683,8 @@ reg: CVUU4(reg)  "# cvuu4\n"  0
 
 ### Control Flow
 
+NEANDER-X has a rich set of comparison jumps, making conditional code efficient:
+
 ```
 /* Labels */
 stmt: LABELV  "%a:\n"
@@ -615,14 +692,36 @@ stmt: LABELV  "%a:\n"
 /* Unconditional jump */
 stmt: JUMPV(addr)  "    JMP %0\n"  1
 
-/* Comparisons and conditional branches */
-stmt: EQI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JZ %a\n"  6
-stmt: NEI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JNZ %a\n" 6
-stmt: LTI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JN %a\n"  6
+/* Comparisons: CMP sets flags without modifying AC
+ * After CMP, use the appropriate conditional jump:
+ *   JZ/JNZ  - equal/not equal (tests Z flag)
+ *   JN      - signed less than (tests N flag)
+ *   JC/JNC  - unsigned less/greater-equal (tests C flag)
+ *   JLE/JGT - signed less-equal/greater (tests N OR Z / N=0 AND Z=0)
+ *   JGE     - signed greater-equal (tests N=0)
+ *   JBE/JA  - unsigned below-equal/above (tests C OR Z / C=0 AND Z=0)
+ */
 
-/* Optimized comparison with memory */
+/* Equal/Not Equal */
+stmt: EQI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JZ %a\n"  5
+stmt: NEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNZ %a\n"  5
+
+/* Signed comparisons */
+stmt: LTI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JN %a\n"  5
+stmt: LEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JLE %a\n"  5
+stmt: GTI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JGT %a\n"  5
+stmt: GEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JGE %a\n"  5
+
+/* Unsigned comparisons */
+stmt: LTU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JC %a\n"  5
+stmt: LEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JBE %a\n"  5
+stmt: GTU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JA %a\n"  5
+stmt: GEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNC %a\n"  5
+
+/* Optimized: comparison with memory operand (avoids temporary) */
 stmt: EQI1(reg,INDIRI1(addr))  "    CMP %1\n    JZ %a\n"  3
-stmt: NEI1(reg,INDIRI1(addr))  "    CMP %1\n    JNZ %a\n" 3
+stmt: NEI1(reg,INDIRI1(addr))  "    CMP %1\n    JNZ %a\n"  3
+stmt: LTI1(reg,INDIRI1(addr))  "    CMP %1\n    JN %a\n"  3
 ```
 
 ### Function Calls and Returns
@@ -800,6 +899,8 @@ static void local(Symbol p) {
 
 ### Function Generation
 
+NEANDER-X has dedicated instructions for stack frame management: `PUSH_FP`, `POP_FP`, `TSF` (Transfer SP to FP), and `TFS` (Transfer FP to SP). These enable standard C calling conventions:
+
 ```c
 static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     int i;
@@ -808,17 +909,30 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     print("\n; Function: %s\n", f->name);
     print("%s:\n", f->x.name);
 
-    /* Prologue */
+    /* Prologue - Standard C function entry
+     * PUSH_FP: Save caller's frame pointer to stack
+     * TSF:     Set FP = SP (establish new frame)
+     */
     print("    ; Prologue\n");
     print("    PUSH_FP\n");     /* Save caller's frame pointer */
-    print("    TSF\n");         /* FP = SP */
+    print("    TSF\n");         /* FP = SP (new frame base) */
 
     /* Initialize register allocation */
     usedmask[IREG] = 0;
     freemask[IREG] = tmask[IREG];
 
-    /* Set up parameter offsets */
-    param_offset = 4;  /* Skip saved FP (2) + return address (2) */
+    /* Set up parameter offsets
+     * Stack layout after prologue:
+     *   [FP+4+n] = argument n
+     *   [FP+4]   = first argument
+     *   [FP+2]   = return address (high byte)
+     *   [FP+1]   = return address (low byte)  -- CALL pushed this
+     *   [FP+0]   = saved FP (high byte)
+     *   [FP-1]   = saved FP (low byte)        -- PUSH_FP pushed this
+     *   [FP-2]   = first local
+     *   ...
+     */
+    param_offset = 4;  /* Skip saved FP (2 bytes) + return address (2 bytes) */
     for (i = 0; callee[i]; i++) {
         Symbol p = callee[i];
         Symbol q = caller[i];
@@ -832,7 +946,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     offset = maxoffset = 0;
     gencode(caller, callee);
 
-    /* Allocate space for local variables */
+    /* Allocate space for local variables by pushing zeros */
     if (maxoffset > 0) {
         print("    ; Allocate %d bytes for locals\n", maxoffset);
         for (i = 0; i < maxoffset; i++) {
@@ -844,12 +958,50 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     /* Emit the generated code */
     emitcode();
 
-    /* Epilogue */
+    /* Epilogue - Standard C function exit
+     * TFS:     SP = FP (deallocate locals)
+     * POP_FP:  Restore caller's frame pointer
+     * RET:     Pop return address and jump to it
+     */
     print("    ; Epilogue\n");
-    print("    TFS\n");         /* SP = FP */
+    print("    TFS\n");         /* SP = FP (deallocate locals) */
     print("    POP_FP\n");      /* Restore caller's FP */
     print("    RET\n");
 }
+```
+
+**Example: Generated code for a simple function**
+
+```c
+char add(char a, char b) {
+    char result = a + b;
+    return result;
+}
+```
+
+Generates:
+
+```assembly
+; Function: add
+_add:
+    ; Prologue
+    PUSH_FP             ; Save caller's frame pointer
+    TSF                 ; FP = SP
+    ; Allocate 1 byte for 'result'
+    LDI 0
+    PUSH
+    ; Load a (at FP+4)
+    LDA 4,FP
+    ; Add b (at FP+5)
+    ADD 5,FP
+    ; Store to result (at FP-1)
+    STA -1,FP
+    ; Return result
+    LDA -1,FP
+    ; Epilogue
+    TFS                 ; SP = FP
+    POP_FP              ; Restore caller's FP
+    RET
 ```
 
 ### Register Mapping
@@ -1003,48 +1155,88 @@ For NEANDER-X with only one accumulator, the wildcard still needs to be properly
 
 ## Step 7: Calling Conventions
 
+NEANDER-X's dedicated frame pointer instructions (`PUSH_FP`, `POP_FP`, `TSF`, `TFS`) enable standard C calling conventions.
+
 ### Stack Frame Layout
 
 ```
 High addresses
 +------------------+
-| Argument N       | [FP + N+3]
+| Argument N       | [FP + 4 + N-1]   <- Last argument pushed first
 | ...              |
-| Argument 1       | [FP + 4]
+| Argument 2       | [FP + 5]
+| Argument 1       | [FP + 4]         <- First argument (closest to FP)
 +------------------+
-| Return Addr Hi   | [FP + 3]
+| Return Addr Hi   | [FP + 3]         <- CALL pushes 16-bit return address
 | Return Addr Lo   | [FP + 2]
 +------------------+
-| Saved FP Hi      | [FP + 1]
-| Saved FP Lo      | [FP + 0] <- FP points here
+| Saved FP Hi      | [FP + 1]         <- PUSH_FP saves 16-bit FP
+| Saved FP Lo      | [FP + 0]         <- FP points here after TSF
 +------------------+
-| Local 1          | [FP - 1]
+| Local 1          | [FP - 1]         <- First local variable
 | Local 2          | [FP - 2]
 | ...              |
-+------------------+ <- SP
++------------------+ <- SP (current stack pointer)
 Low addresses
 ```
 
 ### Calling Sequence
 
-**Caller:**
-1. Push arguments right-to-left
-2. Execute CALL instruction (pushes return address)
-3. On return, pop arguments to clean up stack
+**Caller (before CALL):**
+```assembly
+    ; Call func(a, b) where a and b are 1-byte values
+    LDA b           ; Load second argument
+    PUSH            ; Push b
+    LDA a           ; Load first argument
+    PUSH            ; Push a
+    CALL _func      ; Pushes 16-bit return address, jumps to func
+    ; After return, clean up stack
+    POP             ; Discard a
+    POP             ; Discard b
+    ; Result is in AC
+```
 
-**Callee:**
-1. Save FP (PUSH_FP)
-2. Set FP = SP (TSF)
-3. Allocate local variables
-4. Execute function body
-5. Set SP = FP (TFS)
-6. Restore FP (POP_FP)
-7. Return (RET)
+**Callee (function entry/exit):**
+```assembly
+_func:
+    ; Prologue
+    PUSH_FP         ; Save caller's frame pointer (2 bytes)
+    TSF             ; FP = SP (establish new frame)
+
+    ; Allocate locals (if any)
+    LDI 0
+    PUSH            ; Allocate 1 byte for local
+
+    ; Access parameters using FP-indexed addressing
+    LDA 4,FP        ; Load first parameter (a)
+    ADD 5,FP        ; Add second parameter (b)
+    STA -1,FP       ; Store to local variable
+
+    ; ... function body ...
+
+    ; Epilogue
+    LDA -1,FP       ; Load return value to AC
+    TFS             ; SP = FP (deallocate locals)
+    POP_FP          ; Restore caller's FP
+    RET             ; Pop return address and jump
+```
 
 ### Return Values
 
-- 8-bit values: In AC register
-- 16-bit values: Low byte in AC, high byte in Y
+| Size | Location | Notes |
+|------|----------|-------|
+| 8-bit | AC | Standard return register |
+| 16-bit | Y:AC | Y = high byte, AC = low byte (matches MUL output) |
+
+### Register Preservation
+
+| Register | Caller-saved | Callee-saved |
+|----------|--------------|--------------|
+| AC | Yes | - |
+| X | Yes | - |
+| Y | Yes | - |
+| FP | - | Yes (via PUSH_FP/POP_FP) |
+| SP | - | Automatically restored |
 
 ---
 

@@ -1,34 +1,73 @@
 %{
 /* =============================================================================
- * NEANDER-X Backend for LCC
+ * NEANDER-X Backend for LCC - Enhanced Version
  * =============================================================================
  *
  * This is an LCC backend for the NEANDER-X 8-bit educational processor.
  *
- * NEANDER-X Characteristics:
+ * NEANDER-X Architecture (Full Feature Set):
  * - 8-bit data width
  * - 16-bit address space (64KB via SPI SRAM)
- * - Accumulator-based architecture
- * - Registers: AC (8-bit), X (8-bit), Y (8-bit), FP (16-bit), SP (16-bit), PC (16-bit)
- * - Three condition flags: N (Negative), Z (Zero), C (Carry)
- * - Hardware MUL, DIV, MOD instructions
- * - ADC/SBC for multi-byte arithmetic
- * - Frame pointer support for C-style stack frames
- * - Indexed addressing modes with X, Y, FP
+ * - Accumulator-based architecture with index registers
+ *
+ * Registers:
+ * - AC (8-bit)  : Accumulator - main computation register
+ * - X  (8-bit)  : Index register - array access, expression temp
+ * - Y  (8-bit)  : Index register - MUL high byte, expression temp
+ * - PC (16-bit) : Program counter
+ * - SP (16-bit) : Stack pointer (grows downward)
+ * - FP (16-bit) : Frame pointer for local variable access
+ *
+ * Condition Flags: N (Negative), Z (Zero), C (Carry)
+ *
+ * Key Instructions Used:
+ * - LDA/STA addr     : Load/Store AC from/to memory
+ * - LDA/STA addr,X   : Indexed addressing with X
+ * - LDA/STA addr,Y   : Indexed addressing with Y
+ * - LDA/STA addr,FP  : Frame-relative addressing (locals/params)
+ * - LDI imm          : Load immediate to AC
+ * - LDXI imm         : Load immediate to X
+ * - LDYI imm         : Load immediate to Y
+ * - TAX/TXA          : Transfer AC <-> X
+ * - TAY/TYA          : Transfer AC <-> Y
+ * - INX/INY          : Increment X/Y
+ * - ADD/SUB addr     : Arithmetic with memory
+ * - ADC/SBC addr     : Arithmetic with carry (multi-byte)
+ * - AND/OR/XOR addr  : Bitwise operations
+ * - NOT/NEG          : Complement/Negate AC
+ * - SHL/SHR/ASR      : Shift operations
+ * - MUL              : AC * X -> Y:AC (16-bit result)
+ * - DIV              : AC / X -> AC (quotient), Y (remainder)
+ * - MOD              : AC % X -> AC (remainder)
+ * - CMP addr         : Compare AC with memory (sets flags)
+ * - INC/DEC          : Increment/Decrement AC
+ * - PUSH/POP         : Stack operations
+ * - PUSH_FP/POP_FP   : Save/restore frame pointer
+ * - TSF/TFS          : Transfer SP <-> FP
+ * - CALL/RET         : Subroutine call/return
+ * - JMP/JZ/JNZ/JN    : Jump instructions
+ * - JC/JNC           : Jump on carry/no carry
+ * - JLE/JGT/JGE      : Signed comparison jumps
+ * - JBE/JA           : Unsigned comparison jumps
  *
  * Type mapping:
  * - char:    1 byte (native)
- * - short:   1 byte (8-bit processor limitation)
+ * - short:   1 byte (8-bit processor)
  * - int:     1 byte (8-bit native)
  * - long:    2 bytes (using ADC/SBC)
  * - pointer: 2 bytes (16-bit address space)
- * - float:   not supported (out-of-line)
+ * - float:   not supported
  *
  * Calling convention:
  * - Arguments pushed right-to-left on stack
- * - Return value in AC (8-bit) or AC:Y (16-bit, Y=high byte)
+ * - Return value in AC (8-bit) or Y:AC (16-bit, Y=high byte)
  * - Caller cleans up arguments
  * - FP-relative addressing for parameters and locals
+ *
+ * Register usage strategy:
+ * - AC: Primary computation, return values
+ * - X:  Left operand temp, array index, loop counter
+ * - Y:  Right operand temp, MUL high byte, DIV remainder
  *
  * =============================================================================
  */
@@ -51,8 +90,9 @@ static Symbol intregw;     /* Wildcard for integer registers */
 
 static int cseg;           /* Current segment */
 static int tmpcount;       /* Temporary variable counter */
+static int labelcnt;       /* Label counter for generated labels */
 
-static char rcsid[] = "$Id: neanderx.md $";
+static char rcsid[] = "$Id: neanderx.md v2.0 - Enhanced for full NEANDER-X $";
 
 /* Forward declarations */
 static void address(Symbol, Symbol, long);
@@ -333,43 +373,43 @@ reg: INDIRU1(addr)  "    LDA %0\n"  2
 reg: INDIRI4(addr)  "    LDA %0\n"  2
 reg: INDIRU4(addr)  "    LDA %0\n"  2
 
-reg: INDIRI1(ADDRFP2)  "    LDA_FP %a\n"  2
-reg: INDIRU1(ADDRFP2)  "    LDA_FP %a\n"  2
-reg: INDIRI1(ADDRLP2)  "    LDA_FP %a\n"  2
-reg: INDIRU1(ADDRLP2)  "    LDA_FP %a\n"  2
+reg: INDIRI1(ADDRFP2)  "    LDA %a,FP\n"  2
+reg: INDIRU1(ADDRFP2)  "    LDA %a,FP\n"  2
+reg: INDIRI1(ADDRLP2)  "    LDA %a,FP\n"  2
+reg: INDIRU1(ADDRLP2)  "    LDA %a,FP\n"  2
 
 reg: INDIRI2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRU2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRP2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 
-reg: INDIRI2(ADDRFP2)  "    LDA_FP %a\n    PUSH\n    LDA_FP %a+1\n"  4
-reg: INDIRU2(ADDRFP2)  "    LDA_FP %a\n    PUSH\n    LDA_FP %a+1\n"  4
-reg: INDIRP2(ADDRFP2)  "    LDA_FP %a\n    PUSH\n    LDA_FP %a+1\n"  4
+reg: INDIRI2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
+reg: INDIRU2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
+reg: INDIRP2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
 
 stmt: ASGNI1(addr,reg)  "    STA %0\n"  2
 stmt: ASGNU1(addr,reg)  "    STA %0\n"  2
 
-stmt: ASGNI1(ADDRFP2,reg)  "    STA_FP %a\n"  2
-stmt: ASGNU1(ADDRFP2,reg)  "    STA_FP %a\n"  2
-stmt: ASGNI1(ADDRLP2,reg)  "    STA_FP %a\n"  2
-stmt: ASGNU1(ADDRLP2,reg)  "    STA_FP %a\n"  2
+stmt: ASGNI1(ADDRFP2,reg)  "    STA %a,FP\n"  2
+stmt: ASGNU1(ADDRFP2,reg)  "    STA %a,FP\n"  2
+stmt: ASGNI1(ADDRLP2,reg)  "    STA %a,FP\n"  2
+stmt: ASGNU1(ADDRLP2,reg)  "    STA %a,FP\n"  2
 
 stmt: ASGNI2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 stmt: ASGNU2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 stmt: ASGNP2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 
-stmt: ASGNI2(ADDRFP2,reg)  "    STA_FP %a\n    POP\n    STA_FP %a+1\n"  4
-stmt: ASGNU2(ADDRFP2,reg)  "    STA_FP %a\n    POP\n    STA_FP %a+1\n"  4
-stmt: ASGNP2(ADDRFP2,reg)  "    STA_FP %a\n    POP\n    STA_FP %a+1\n"  4
+stmt: ASGNI2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
+stmt: ASGNU2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
+stmt: ASGNP2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
 
-reg: INDIRI1(ADDI2(addr,reg))  "    TAX\n    LDA_X %0\n"  3
-reg: INDIRU1(ADDI2(addr,reg))  "    TAX\n    LDA_X %0\n"  3
+reg: INDIRI1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+reg: INDIRU1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
 
-stmt: ASGNI1(ADDI2(addr,reg),reg)  "    PUSH\n    TAX\n    POP\n    STA_X %0\n"  5
-stmt: ASGNU1(ADDI2(addr,reg),reg)  "    PUSH\n    TAX\n    POP\n    STA_X %0\n"  5
+stmt: ASGNI1(ADDI2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+stmt: ASGNU1(ADDI2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
 
-reg: ADDI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
-reg: ADDU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
+reg: ADDI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
+reg: ADDU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
 
 reg: ADDI1(reg,INDIRI1(addr))  "    ADD %1\n"  2
 reg: ADDU1(reg,INDIRU1(addr))  "    ADD %1\n"  2
@@ -377,8 +417,8 @@ reg: ADDU1(reg,INDIRU1(addr))  "    ADD %1\n"  2
 reg: ADDI1(reg,conN)  "    INC\n"  1
 reg: ADDU1(reg,conN)  "    INC\n"  1
 
-reg: SUBI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
-reg: SUBU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
+reg: SUBI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    STA _tmp2\n    LDA _tmp\n    SUB _tmp2\n"  6
+reg: SUBU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    STA _tmp2\n    LDA _tmp\n    SUB _tmp2\n"  6
 
 reg: SUBI1(reg,INDIRI1(addr))  "    SUB %1\n"  2
 reg: SUBU1(reg,INDIRU1(addr))  "    SUB %1\n"  2
@@ -388,11 +428,11 @@ reg: SUBU1(reg,conN)  "    DEC\n"  1
 
 reg: NEGI1(reg)  "    NEG\n"  1
 
-reg: ADDI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _tmp_hi\n    ADC _t2_hi\n"  12
-reg: ADDU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _tmp_hi\n    ADC _t2_hi\n"  12
+reg: ADDI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  12
+reg: ADDU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  12
 
-reg: SUBI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    POP\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
-reg: SUBU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    POP\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
+reg: SUBI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
+reg: SUBU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
 
 reg: ADDI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
 reg: ADDU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
@@ -400,29 +440,29 @@ reg: ADDU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
 reg: SUBI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
 reg: SUBU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
 
-reg: MULI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MUL\n"  5
-reg: MULU1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MUL\n"  5
+reg: MULI1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
+reg: MULU1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
 
-reg: DIVI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    DIV\n"  5
-reg: DIVU1(reg,reg)  "    PUSH\n    TAX\n    POP\n    DIV\n"  5
+reg: DIVI1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
+reg: DIVU1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
 
-reg: MODI1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MOD\n"  5
-reg: MODU1(reg,reg)  "    PUSH\n    TAX\n    POP\n    MOD\n"  5
+reg: MODI1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
+reg: MODU1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
 
-reg: BANDI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    AND _tmp\n"  5
-reg: BANDU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    AND _tmp\n"  5
+reg: BANDI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    AND _tmp\n"  4
+reg: BANDU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    AND _tmp\n"  4
 
 reg: BANDI1(reg,INDIRI1(addr))  "    AND %1\n"  2
 reg: BANDU1(reg,INDIRU1(addr))  "    AND %1\n"  2
 
-reg: BORI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    OR _tmp\n"  5
-reg: BORU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    OR _tmp\n"  5
+reg: BORI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    OR _tmp\n"  4
+reg: BORU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    OR _tmp\n"  4
 
 reg: BORI1(reg,INDIRI1(addr))  "    OR %1\n"  2
 reg: BORU1(reg,INDIRU1(addr))  "    OR %1\n"  2
 
-reg: BXORI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    XOR _tmp\n"  5
-reg: BXORU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    XOR _tmp\n"  5
+reg: BXORI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    XOR _tmp\n"  4
+reg: BXORU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    XOR _tmp\n"  4
 
 reg: BXORI1(reg,INDIRI1(addr))  "    XOR %1\n"  2
 reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  2
@@ -436,11 +476,11 @@ reg: LSHU1(reg,conN)  "    SHL\n"  1
 reg: RSHU1(reg,conN)  "    SHR\n"  1
 reg: RSHI1(reg,conN)  "    ASR\n"  1
 
-reg: LSHI1(reg,reg)  "    PUSH\n    TAX\n    POP\n_shl_%a:\n    TXA\n    JZ _shld_%a\n    SHL\n    DEX\n    JMP _shl_%a\n_shld_%a:\n"  10
-reg: LSHU1(reg,reg)  "    PUSH\n    TAX\n    POP\n_shl_%a:\n    TXA\n    JZ _shld_%a\n    SHL\n    DEX\n    JMP _shl_%a\n_shld_%a:\n"  10
+reg: LSHI1(reg,reg)  "    TAX\n    POP\n    TAY\n_shl_%a:\n    TXA\n    JZ _shld_%a\n    TYA\n    SHL\n    TAY\n    TXA\n    DEC\n    TAX\n    JMP _shl_%a\n_shld_%a:\n    TYA\n"  15
+reg: LSHU1(reg,reg)  "    TAX\n    POP\n    TAY\n_shl_%a:\n    TXA\n    JZ _shld_%a\n    TYA\n    SHL\n    TAY\n    TXA\n    DEC\n    TAX\n    JMP _shl_%a\n_shld_%a:\n    TYA\n"  15
 
-reg: RSHU1(reg,reg)  "    PUSH\n    TAX\n    POP\n_shr_%a:\n    TXA\n    JZ _shrd_%a\n    SHR\n    DEX\n    JMP _shr_%a\n_shrd_%a:\n"  10
-reg: RSHI1(reg,reg)  "    PUSH\n    TAX\n    POP\n_asr_%a:\n    TXA\n    JZ _asrd_%a\n    ASR\n    DEX\n    JMP _asr_%a\n_asrd_%a:\n"  10
+reg: RSHU1(reg,reg)  "    TAX\n    POP\n    TAY\n_shr_%a:\n    TXA\n    JZ _shrd_%a\n    TYA\n    SHR\n    TAY\n    TXA\n    DEC\n    TAX\n    JMP _shr_%a\n_shrd_%a:\n    TYA\n"  15
+reg: RSHI1(reg,reg)  "    TAX\n    POP\n    TAY\n_asr_%a:\n    TXA\n    JZ _asrd_%a\n    TYA\n    ASR\n    TAY\n    TXA\n    DEC\n    TAX\n    JMP _asr_%a\n_asrd_%a:\n    TYA\n"  15
 
 reg: CVII1(reg)  "# cvii1 - truncate to 1 byte\n"  0
 reg: CVIU1(reg)  "# cviu1\n"  0
@@ -470,40 +510,40 @@ stmt: LABELV  "%a:\n"
 stmt: JUMPV(addr)  "    JMP %0\n"  1
 stmt: JUMPV(reg)   "    JMP %0\n"  10
 
-stmt: EQI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JZ %a\n"  6
-stmt: EQU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JZ %a\n"  6
+stmt: EQI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JZ %a\n"  5
+stmt: EQU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JZ %a\n"  5
 
 stmt: EQI1(reg,INDIRI1(addr))  "    CMP %1\n    JZ %a\n"  3
 stmt: EQU1(reg,INDIRU1(addr))  "    CMP %1\n    JZ %a\n"  3
 
-stmt: NEI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JNZ %a\n"  6
-stmt: NEU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JNZ %a\n"  6
+stmt: NEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNZ %a\n"  5
+stmt: NEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNZ %a\n"  5
 
 stmt: NEI1(reg,INDIRI1(addr))  "    CMP %1\n    JNZ %a\n"  3
 stmt: NEU1(reg,INDIRU1(addr))  "    CMP %1\n    JNZ %a\n"  3
 
-stmt: LTI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JN %a\n"  6
+stmt: LTI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JN %a\n"  5
 stmt: LTI1(reg,INDIRI1(addr))  "    CMP %1\n    JN %a\n"  3
 
-stmt: LTU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JC %a\n"  6
+stmt: LTU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JC %a\n"  5
 stmt: LTU1(reg,INDIRU1(addr))  "    CMP %1\n    JC %a\n"  3
 
-stmt: LEI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JLE %a\n"  6
+stmt: LEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JLE %a\n"  5
 stmt: LEI1(reg,INDIRI1(addr))  "    CMP %1\n    JLE %a\n"  3
 
-stmt: LEU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JBE %a\n"  6
+stmt: LEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JBE %a\n"  5
 stmt: LEU1(reg,INDIRU1(addr))  "    CMP %1\n    JBE %a\n"  3
 
-stmt: GTI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JGT %a\n"  6
+stmt: GTI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JGT %a\n"  5
 stmt: GTI1(reg,INDIRI1(addr))  "    CMP %1\n    JGT %a\n"  3
 
-stmt: GTU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JA %a\n"  6
+stmt: GTU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JA %a\n"  5
 stmt: GTU1(reg,INDIRU1(addr))  "    CMP %1\n    JA %a\n"  3
 
-stmt: GEI1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JGE %a\n"  6
+stmt: GEI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JGE %a\n"  5
 stmt: GEI1(reg,INDIRI1(addr))  "    CMP %1\n    JGE %a\n"  3
 
-stmt: GEU1(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    CMP _tmp\n    JNC %a\n"  6
+stmt: GEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNC %a\n"  5
 stmt: GEU1(reg,INDIRU1(addr))  "    CMP %1\n    JNC %a\n"  3
 
 stmt: ARGI1(reg)  "    PUSH\n"  1
@@ -572,13 +612,15 @@ static void progbeg(int argc, char *argv[]) {
     print("; NEANDER-X Assembly\n");
     print("; Generated by LCC\n");
     print("\n");
-    print("; Runtime variables\n");
+    print("; Runtime variables (page zero for fast access)\n");
     print("    .org 0x0000\n");
-    print("_tmp:    .byte 0\n");
-    print("_tmp_lo: .byte 0\n");
-    print("_tmp_hi: .byte 0\n");
-    print("_t2_hi:  .byte 0\n");
-    print("_zero:   .byte 0\n");
+    print("_tmp:    .byte 0     ; General purpose temp\n");
+    print("_tmp2:   .byte 0     ; Second temp for binary ops\n");
+    print("_tmp_lo: .byte 0     ; 16-bit temp low byte\n");
+    print("_tmp_hi: .byte 0     ; 16-bit temp high byte\n");
+    print("_t2_lo:  .byte 0     ; Second 16-bit temp low\n");
+    print("_t2_hi:  .byte 0     ; Second 16-bit temp high\n");
+    print("_zero:   .byte 0     ; Constant zero (for clearing carry)\n");
     print("\n");
     print("; Code section\n");
     print("    .org 0x0100\n");
