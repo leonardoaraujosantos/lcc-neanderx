@@ -80,13 +80,15 @@
 #define RIGHT_CHILD(p) ((p)->kids[1])
 #define STATE_LABEL(p) ((p)->x.state)
 
-/* Register indices */
+/* Register indices - AC is primary, X and Y are temporaries */
 enum { REG_AC=0, REG_X=1, REG_Y=2, REG_MAX=3 };
 
 #define IREG 1    /* Integer register class */
 
 static Symbol intreg[32];  /* Integer register array */
 static Symbol intregw;     /* Wildcard for integer registers */
+static Symbol xreg;        /* X register symbol */
+static Symbol yreg;        /* Y register symbol */
 
 static int cseg;           /* Current segment */
 static int tmpcount;       /* Temporary variable counter */
@@ -221,6 +223,7 @@ static int needs16bit(Node p) {
 %term ADDU1=1334
 %term ADDI2=2357
 %term ADDU2=2358
+%term ADDP2=2359
 %term ADDI4=4405
 %term ADDU4=4406
 
@@ -373,55 +376,59 @@ reg: INDIRU1(addr)  "    LDA %0\n"  2
 reg: INDIRI4(addr)  "    LDA %0\n"  2
 reg: INDIRU4(addr)  "    LDA %0\n"  2
 
-reg: INDIRI1(ADDRFP2)  "    LDA %a,FP\n"  2
-reg: INDIRU1(ADDRFP2)  "    LDA %a,FP\n"  2
-reg: INDIRI1(ADDRLP2)  "    LDA %a,FP\n"  2
-reg: INDIRU1(ADDRLP2)  "    LDA %a,FP\n"  2
-
 reg: INDIRI2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRU2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRP2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 
-reg: INDIRI2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
-reg: INDIRU2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
-reg: INDIRP2(ADDRFP2)  "    LDA %a,FP\n    PUSH\n    LDA %a+1,FP\n"  4
-
 stmt: ASGNI1(addr,reg)  "    STA %0\n"  2
 stmt: ASGNU1(addr,reg)  "    STA %0\n"  2
-
-stmt: ASGNI1(ADDRFP2,reg)  "    STA %a,FP\n"  2
-stmt: ASGNU1(ADDRFP2,reg)  "    STA %a,FP\n"  2
-stmt: ASGNI1(ADDRLP2,reg)  "    STA %a,FP\n"  2
-stmt: ASGNU1(ADDRLP2,reg)  "    STA %a,FP\n"  2
 
 stmt: ASGNI2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 stmt: ASGNU2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 stmt: ASGNP2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
 
-stmt: ASGNI2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
-stmt: ASGNU2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
-stmt: ASGNP2(ADDRFP2,reg)  "    STA %a,FP\n    POP\n    STA %a+1,FP\n"  4
-
 reg: INDIRI1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
 reg: INDIRU1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+reg: INDIRI1(ADDP2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+reg: INDIRU1(ADDP2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+reg: INDIRI1(ADDP2(reg,addr))  "    TAX\n    LDA %1,X\n"  3
+reg: INDIRU1(ADDP2(reg,addr))  "    TAX\n    LDA %1,X\n"  3
 
 stmt: ASGNI1(ADDI2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
 stmt: ASGNU1(ADDI2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+stmt: ASGNI1(ADDP2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+stmt: ASGNU1(ADDP2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+stmt: ASGNI1(ADDP2(reg,addr),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %1,X\n"  5
+stmt: ASGNU1(ADDP2(reg,addr),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %1,X\n"  5
 
-reg: ADDI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
-reg: ADDU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    ADD _tmp\n"  4
+reg: ADDI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDI1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDI1(LOADI1(INDIRU1(addr)),LOADI1(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDU1(LOADU1(INDIRU1(addr)),LOADU1(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n"  2
 
-reg: ADDI1(reg,INDIRI1(addr))  "    ADD %1\n"  2
-reg: ADDU1(reg,INDIRU1(addr))  "    ADD %1\n"  2
+reg: ADDI1(reg,reg)  "    ADDX\n"  10
+reg: ADDU1(reg,reg)  "    ADDX\n"  10
+
+reg: ADDI1(reg,INDIRI1(addr))  "    ADD %1\n"  1
+reg: ADDU1(reg,INDIRU1(addr))  "    ADD %1\n"  1
+reg: ADDI1(reg,INDIRU1(addr))  "    ADD %1\n"  1
 
 reg: ADDI1(reg,conN)  "    INC\n"  1
 reg: ADDU1(reg,conN)  "    INC\n"  1
 
-reg: SUBI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    STA _tmp2\n    LDA _tmp\n    SUB _tmp2\n"  6
-reg: SUBU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    STA _tmp2\n    LDA _tmp\n    SUB _tmp2\n"  6
+reg: SUBI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBI1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBI1(LOADI1(INDIRU1(addr)),LOADI1(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBU1(LOADU1(INDIRU1(addr)),LOADU1(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n"  2
 
-reg: SUBI1(reg,INDIRI1(addr))  "    SUB %1\n"  2
-reg: SUBU1(reg,INDIRU1(addr))  "    SUB %1\n"  2
+reg: SUBI1(reg,reg)  "    SUBX\n"  10
+reg: SUBU1(reg,reg)  "    SUBX\n"  10
+
+reg: SUBI1(reg,INDIRI1(addr))  "    SUB %1\n"  1
+reg: SUBU1(reg,INDIRU1(addr))  "    SUB %1\n"  1
+reg: SUBI1(reg,INDIRU1(addr))  "    SUB %1\n"  1
 
 reg: SUBI1(reg,conN)  "    DEC\n"  1
 reg: SUBU1(reg,conN)  "    DEC\n"  1
@@ -430,6 +437,8 @@ reg: NEGI1(reg)  "    NEG\n"  1
 
 reg: ADDI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  12
 reg: ADDU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  12
+reg: ADDP2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  12
+addr: ADDP2(addr,reg)  "%0"  1
 
 reg: SUBI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
 reg: SUBU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
@@ -437,8 +446,17 @@ reg: SUBU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    ST
 reg: ADDI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
 reg: ADDU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
 
+reg: ADDI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n"  2
+reg: ADDI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    ADD %1\n"  1
+reg: ADDU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    ADD %1\n"  1
+
 reg: SUBI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
 reg: SUBU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
+reg: SUBI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n"  2
+reg: SUBI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    SUB %1\n"  1
+reg: SUBU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    SUB %1\n"  1
 
 reg: MULI1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
 reg: MULU1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
@@ -449,23 +467,32 @@ reg: DIVU1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
 reg: MODI1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
 reg: MODU1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
 
-reg: BANDI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    AND _tmp\n"  4
-reg: BANDU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    AND _tmp\n"  4
+reg: BANDI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    AND %1\n"  2
+reg: BANDU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    AND %1\n"  2
 
-reg: BANDI1(reg,INDIRI1(addr))  "    AND %1\n"  2
-reg: BANDU1(reg,INDIRU1(addr))  "    AND %1\n"  2
+reg: BANDI1(reg,reg)  "    ANDX\n"  10
+reg: BANDU1(reg,reg)  "    ANDX\n"  10
 
-reg: BORI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    OR _tmp\n"  4
-reg: BORU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    OR _tmp\n"  4
+reg: BANDI1(reg,INDIRI1(addr))  "    AND %1\n"  1
+reg: BANDU1(reg,INDIRU1(addr))  "    AND %1\n"  1
 
-reg: BORI1(reg,INDIRI1(addr))  "    OR %1\n"  2
-reg: BORU1(reg,INDIRU1(addr))  "    OR %1\n"  2
+reg: BORI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    OR %1\n"  2
+reg: BORU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    OR %1\n"  2
 
-reg: BXORI1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    XOR _tmp\n"  4
-reg: BXORU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    XOR _tmp\n"  4
+reg: BORI1(reg,reg)  "    ORX\n"  10
+reg: BORU1(reg,reg)  "    ORX\n"  10
 
-reg: BXORI1(reg,INDIRI1(addr))  "    XOR %1\n"  2
-reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  2
+reg: BORI1(reg,INDIRI1(addr))  "    OR %1\n"  1
+reg: BORU1(reg,INDIRU1(addr))  "    OR %1\n"  1
+
+reg: BXORI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    XOR %1\n"  2
+reg: BXORU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    XOR %1\n"  2
+
+reg: BXORI1(reg,reg)  "    XORX\n"  10
+reg: BXORU1(reg,reg)  "    XORX\n"  10
+
+reg: BXORI1(reg,INDIRI1(addr))  "    XOR %1\n"  1
+reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  1
 
 reg: BCOMI1(reg)  "    NOT\n"  1
 reg: BCOMU1(reg)  "    NOT\n"  1
@@ -602,11 +629,17 @@ static void progbeg(int argc, char *argv[]) {
     for (i = 1; i < argc; i++) {
     }
 
+    /* Register AC (primary accumulator) */
     intreg[REG_AC] = mkreg("AC", REG_AC, 1, IREG);
+    /* Register X (can hold temporaries) */
+    intreg[REG_X] = xreg = mkreg("X", REG_X, 1, IREG);
+    /* Register Y (can hold temporaries) */
+    intreg[REG_Y] = yreg = mkreg("Y", REG_Y, 1, IREG);
 
     intregw = mkwildcard(intreg);
 
-    tmask[IREG] = 0x01;
+    /* 3 temporary registers available: AC (bit 0), X (bit 1), Y (bit 2) */
+    tmask[IREG] = 0x07;
     vmask[IREG] = 0;
 
     print("; NEANDER-X Assembly\n");
@@ -779,14 +812,7 @@ static void target(Node p) {
 }
 
 static void clobber(Node p) {
-    switch (specific(p->op)) {
-    case CALL+I:
-    case CALL+U:
-    case CALL+P:
-    case CALL+V:
-        spill(0xFF, IREG, p);
-        break;
-    }
+    /* Stack-based machine - no clobbering needed */
 }
 
 Interface neanderxIR = {

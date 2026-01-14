@@ -15,9 +15,11 @@ This document provides a comprehensive, step-by-step guide to porting the LCC (L
 9. [Step 5: Implementing Interface Functions](#step-5-implementing-interface-functions)
 10. [Step 6: Register Management](#step-6-register-management)
 11. [Step 7: Calling Conventions](#step-7-calling-conventions)
-12. [Step 8: Testing Your Backend](#step-8-testing-your-backend)
-13. [Common Pitfalls and Solutions](#common-pitfalls-and-solutions)
-14. [References](#references)
+12. [Step 8: Compiling and Using the NEANDER-X Backend](#step-8-compiling-and-using-the-neander-x-backend)
+13. [Step 9: Testing Your Backend](#step-9-testing-your-backend)
+14. [Tips and Tricks](#tips-and-tricks)
+15. [Common Pitfalls and Solutions](#common-pitfalls-and-solutions)
+16. [References](#references)
 
 ---
 
@@ -145,6 +147,54 @@ CALL addr       ; Call subroutine (pushes 16-bit return address)
 RET             ; Return from subroutine
 ```
 
+### LCC Extension Instructions (v3.0)
+
+These instructions were added specifically to optimize C compiler code generation:
+
+```assembly
+; Register-to-Register ALU (eliminates memory traffic)
+ADDX            ; AC = AC + X
+SUBX            ; AC = AC - X
+ADDY            ; AC = AC + Y
+SUBY            ; AC = AC - Y
+ANDX            ; AC = AC & X
+ORX             ; AC = AC | X
+XORX            ; AC = AC ^ X
+
+; Immediate Operations
+CMPI imm        ; Compare AC with immediate (sets flags, preserves AC)
+MULI imm        ; AC = AC * imm; Y = high byte of result
+DIVI imm        ; AC = AC / imm; Y = remainder
+
+; Indirect Addressing (pointer operations)
+LDA (addr)      ; AC = MEM[MEM[addr]] - dereference pointer
+STA (addr)      ; MEM[MEM[addr]] = AC - store through pointer
+LDA (addr),Y    ; AC = MEM[MEM[addr] + Y] - indexed through pointer
+
+; Swap Operations (operand reordering)
+SWPX            ; Swap AC and X
+SWPY            ; Swap AC and Y
+
+; Decrement X/Y (loop optimization)
+DEX             ; X = X - 1
+DEY             ; Y = Y - 1
+
+; Loop Primitive
+DECJNZ addr     ; AC = AC - 1; if AC != 0: jump to addr
+```
+
+**Why These Instructions Matter for C:**
+
+| Instruction | C Pattern | Benefit |
+|-------------|-----------|---------|
+| ADDX/SUBX | `a + b` | No memory temp needed |
+| CMPI | `if (x == 5)` | Direct constant comparison |
+| MULI/DIVI | `x * 10`, `x / 3` | Single instruction for constant ops |
+| LDA (addr) | `*ptr` | Direct pointer dereference |
+| LDA (addr),Y | `ptr[i]` | Array through pointer in 2 instructions |
+| DEX/DEY | `for` loops | Efficient loop counters |
+| SWPX | `b - a` | Operand reordering without temps |
+
 ### Memory Model
 
 - 16-bit address space (64KB via SPI SRAM)
@@ -164,10 +214,18 @@ Unlike the original NEANDER (which only had AC), NEANDER-X was specifically exte
 6. **Rich Comparison Jumps**: Full set of signed and unsigned conditional branches
 7. **CMP Instruction**: Sets all flags without modifying AC, enabling efficient comparisons
 
+**LCC Extension Additions (v3.0):**
+
+8. **Register-to-Register ALU**: ADDX/SUBX/ANDX/ORX/XORX eliminate memory temps for binary operations
+9. **Immediate Operations**: CMPI/MULI/DIVI for direct constant operations
+10. **Indirect Addressing**: LDA (addr) and LDA (addr),Y for efficient pointer operations
+11. **Swap Instructions**: SWPX/SWPY for operand reordering without temporaries
+12. **DEX/DEY**: Direct decrement for loop counters
+
 ### Remaining Challenges
 
 1. **C Type Promotion**: C promotes `char` to `int` for arithmetic - the backend must handle this
-2. **Limited Registers**: While X and Y help, complex expressions still need stack/memory temps
+2. **Complex Expressions**: While much improved with reg-to-reg ops, some expressions still need temps
 3. **8-bit Native Width**: 16/32-bit operations require multiple instructions
 
 ---
@@ -1240,15 +1298,108 @@ _func:
 
 ---
 
-## Step 8: Testing Your Backend
+## Step 8: Compiling and Using the NEANDER-X Backend
 
-### Build the Compiler
+This section provides detailed instructions on how to build and use the LCC compiler with the NEANDER-X backend.
+
+### Building from Source
+
+**1. Clone and prepare the source:**
 
 ```bash
+git clone https://github.com/drh/lcc.git
 cd lcc
+```
+
+**2. Ensure your backend files are in place:**
+- `src/neanderx.md` - Machine description file
+- `src/bind.c` - Modified to include neanderx target
+- `etc/neanderx.c` - Driver configuration (optional)
+
+**3. Build the compiler:**
+
+```bash
+# Build using make
 make clean
 make rcc BUILDDIR=build TARGET=neanderx
+
+# This generates:
+# - build/lburg     (grammar processor tool)
+# - build/neanderx.c (generated from neanderx.md)
+# - build/rcc       (the compiler)
 ```
+
+**4. Verify the build:**
+
+```bash
+./build/rcc -target=neanderx --help
+```
+
+### Compiling C Programs
+
+**Basic usage:**
+
+```bash
+# Compile a C file to NEANDER-X assembly
+./build/rcc -target=neanderx myprogram.c > myprogram.asm
+
+# Or output to specific file
+./build/rcc -target=neanderx myprogram.c -o myprogram.asm
+```
+
+**With preprocessing (if cpp is available):**
+
+```bash
+# Preprocess first, then compile
+cpp myprogram.c | ./build/rcc -target=neanderx > myprogram.asm
+```
+
+**Useful compiler flags:**
+
+| Flag | Description |
+|------|-------------|
+| `-target=neanderx` | Select the NEANDER-X backend |
+| `-d` | Enable debug output (if implemented in backend) |
+| `-v` | Verbose mode |
+| `-S` | Generate assembly (default for rcc) |
+
+### Example Workflow
+
+```bash
+# 1. Write your C program
+cat > test.c << 'EOF'
+char add(char a, char b) {
+    return a + b;
+}
+
+char main(void) {
+    return add(3, 5);
+}
+EOF
+
+# 2. Compile to NEANDER-X assembly
+./build/rcc -target=neanderx test.c > test.asm
+
+# 3. View the generated assembly
+cat test.asm
+
+# 4. Assemble and run on NEANDER-X simulator/hardware
+# (depends on your assembler/simulator setup)
+```
+
+### Verifying Generated Code
+
+Use the symbolic backend to see what IR operations your program generates:
+
+```bash
+./build/rcc -target=symbolic test.c
+```
+
+This shows the intermediate representation before instruction selection, helping you verify your backend handles all required operations.
+
+---
+
+## Step 9: Testing Your Backend
 
 ### Test with Simple Programs
 
@@ -1310,6 +1461,227 @@ This helps you understand what terminals your backend needs to handle.
 
 ---
 
+## Tips and Tricks
+
+This section covers advanced debugging techniques and common issues encountered when porting LCC to a new architecture, using the NEANDER-X backend development as a case study.
+
+### Understanding the IR Tree Structure
+
+The most important skill when debugging LCC backends is understanding the actual IR tree structure. What you expect the tree to look like and what it actually looks like can be very different.
+
+**Use dflag for detailed debugging:**
+
+In `src/gen.c`, there's a debug flag that shows the actual IR trees being matched:
+
+```c
+// In src/gen.c, temporarily change:
+int dflag = 1;  // Enable debug output (normally 0)
+```
+
+When enabled, you'll see output like:
+
+```
+dumpcover: n=0x... ADDI1
+  l=0x... LOADI1
+    l=0x... INDIRU1
+      l=0x... ADDRLP2
+  r=0x... LOADI1
+    l=0x... INDIRU1
+      l=0x... ADDRLP2
+```
+
+This reveals the **actual** tree structure the compiler is trying to match.
+
+### The LOAD Node Wrapper Problem
+
+**Problem:** You write rules like:
+```
+reg: ADDI1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    ADD %1\n"  2
+```
+
+But the compiler generates `LDA -1; LDA -2; ADDX` instead of `LDA -1; ADD -2`.
+
+**Root Cause:** LCC inserts LOAD nodes between arithmetic operations and memory accesses. The actual tree is:
+```
+ADDI1(LOADI1(INDIRU1(addr)), LOADI1(INDIRU1(addr)))
+```
+
+**Solution:** Add rules that match the LOAD wrappers:
+```
+reg: ADDI1(LOADI1(INDIRU1(addr)),LOADI1(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n"  2
+reg: SUBI1(LOADI1(INDIRU1(addr)),LOADI1(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n"  2
+```
+
+The `LOADI1`/`LOADU1` terminals wrap memory loads and are required for proper matching.
+
+### The unsigned_char Flag Impact
+
+**Problem:** Your rules match `INDIRI1` but the compiler uses `INDIRU1`.
+
+**Root Cause:** The `unsigned_char` flag in the Interface structure determines whether `char` is signed or unsigned:
+
+```c
+Interface neanderxIR = {
+    // ...
+    1,          /* unsigned_char - if 1, char is unsigned */
+    // ...
+};
+```
+
+When `unsigned_char = 1`:
+- `char` variables use `INDIRU1` (unsigned load)
+- Rules must match `INDIRU1`, not `INDIRI1`
+
+**Solution:** Add rules for both signed and unsigned variants, or ensure your `unsigned_char` setting matches your rules.
+
+### Pointer Arithmetic (ADDP2) for Array Indexing
+
+**Problem:** Array access like `arr[i]` causes "Bad terminal 2359" error.
+
+**Root Cause:** Array indexing involves pointer arithmetic. `arr[i]` becomes `*(arr + i)`, which generates an `ADDP2` (pointer add) node. Terminal 2359 = ADDP2.
+
+**Solution:** Add the ADDP2 terminal and rules:
+
+```
+%term ADDP2=2359
+
+/* Pointer arithmetic for array indexing */
+addr: ADDP2(addr,reg)  "%0"  1
+
+/* Load through indexed pointer */
+reg: INDIRI1(ADDP2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+reg: INDIRU1(ADDP2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+
+/* Store through indexed pointer */
+stmt: ASGNI1(ADDP2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+stmt: ASGNU1(ADDP2(addr,reg),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %0,X\n"  5
+```
+
+### Operand Ordering in Tree Patterns
+
+**Problem:** Your rules work for `base + index` but fail for `index + base`.
+
+**Root Cause:** The compiler may generate `ADDP2(index, base)` instead of `ADDP2(base, index)`. For example, `arr[i]` might generate:
+```
+ADDP2(CVUU2(INDIRU1(ADDRLP2(i))), ADDRGP2(arr))
+```
+
+This is `index + base`, not `base + index`!
+
+**Solution:** Add rules for both operand orderings:
+
+```
+/* base + index */
+reg: INDIRU1(ADDP2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
+
+/* index + base (reversed operands - use %1 for base address) */
+reg: INDIRU1(ADDP2(reg,addr))  "    TAX\n    LDA %1,X\n"  3
+
+/* Store with reversed operands */
+stmt: ASGNI1(ADDP2(reg,addr),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %1,X\n"  5
+stmt: ASGNU1(ADDP2(reg,addr),reg)  "    TAY\n    POP\n    TAX\n    TYA\n    STA %1,X\n"  5
+```
+
+Note how `%1` is used instead of `%0` to reference the second child (the address).
+
+### Using _decode_reg for Rule Debugging
+
+When you see confusing rule numbers in debug output, use the `_decode_reg` array in the generated `.c` file to map internal rule numbers to template rules:
+
+```bash
+# Look at the generated backend code
+grep -A 10 "_decode" build/neanderx.c
+```
+
+This helps understand which grammar rules are being selected.
+
+### Debugging "Bad terminal" Errors
+
+**When you see "Bad terminal XXXX":**
+
+1. Calculate what operation it represents:
+   - terminal = size * 1024 + op * 16 + type + 5
+   - size: 1, 2, 4, or 8
+   - op: operation number from ops.h
+   - type: I=0, U=1, P=2
+
+2. Look up the operation in `src/ops.h`
+
+3. Add the terminal definition and rule
+
+**Common missing terminals:**
+| Terminal | Number | Description |
+|----------|--------|-------------|
+| ADDP2 | 2359 | Pointer addition (array indexing) |
+| SUBP2 | 2375 | Pointer subtraction |
+| CVUU2 | 2230 | Convert unsigned to unsigned 2-byte |
+| CVPU2 | 2231 | Convert pointer to unsigned 2-byte |
+
+### Expression Temporaries and Register Pressure
+
+**Problem:** Complex expressions fail with "can't find a reg" or generate inefficient code.
+
+**Solution:** For accumulator-based architectures, use X and Y registers as expression temporaries:
+
+```
+reg: ADDI1(reg,reg)  "    TAX\n    POP\n    ADDX\n"  3
+```
+
+This pattern:
+1. Saves right operand to X (`TAX`)
+2. Pops left operand from stack to AC (`POP`)
+3. Performs the operation (`ADDX`)
+
+### Testing Incrementally
+
+**Recommended testing order:**
+
+1. **Constants and returns:**
+   ```c
+   char main(void) { return 42; }
+   ```
+
+2. **Local variables:**
+   ```c
+   char main(void) { char x = 5; return x; }
+   ```
+
+3. **Simple arithmetic:**
+   ```c
+   char main(void) { char a = 3, b = 2; return a + b; }
+   ```
+
+4. **Function calls:**
+   ```c
+   char add(char a, char b) { return a + b; }
+   char main(void) { return add(3, 5); }
+   ```
+
+5. **Arrays with constant indices:**
+   ```c
+   char arr[3];
+   char main(void) { arr[0] = 1; return arr[0]; }
+   ```
+
+6. **Arrays with variable indices:**
+   ```c
+   char arr[3];
+   char main(void) { char i = 1; arr[i] = 5; return arr[i]; }
+   ```
+
+7. **Loops:**
+   ```c
+   char main(void) { char i = 0; while (i < 10) i = i + 1; return i; }
+   ```
+
+8. **Pointers:**
+   ```c
+   char x;
+   char main(void) { char *p = &x; *p = 42; return x; }
+   ```
+
+---
+
 ## Common Pitfalls and Solutions
 
 ### 1. "Bad terminal XXXX"
@@ -1361,6 +1733,24 @@ terminal = size * 1024 + (op - 1) * 16 + type + 5
 ```
 
 Compare with existing backends like x86linux.md.
+
+### 7. Wrong Code Generated for Binary Operations
+
+**Problem:** `a + b` generates two loads followed by a register-to-register add instead of using memory operand.
+
+**Solution:** The IR tree has LOAD wrappers. Add rules that match `LOADI1(INDIRU1(addr))` patterns. See "The LOAD Node Wrapper Problem" above.
+
+### 8. Array Indexing Fails
+
+**Problem:** `arr[i]` with variable index fails with "Bad terminal 2359".
+
+**Solution:** Add `ADDP2` terminal and pointer arithmetic rules. See "Pointer Arithmetic (ADDP2)" above.
+
+### 9. Rules Match Sometimes But Not Others
+
+**Problem:** Same pattern works in some contexts but fails in others.
+
+**Solution:** Operand ordering may vary. Add rules for both `ADDP2(addr,reg)` and `ADDP2(reg,addr)`. See "Operand Ordering in Tree Patterns" above.
 
 ---
 
