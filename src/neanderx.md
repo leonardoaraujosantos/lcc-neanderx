@@ -1,22 +1,25 @@
 %{
 /* =============================================================================
- * NEANDER-X Backend for LCC - Enhanced Version
+ * NEANDER-X Backend for LCC - 16-bit Version
  * =============================================================================
  *
- * This is an LCC backend for the NEANDER-X 8-bit educational processor.
+ * This is an LCC backend for the NEANDER-X 16-bit educational processor.
  *
- * NEANDER-X Architecture (Full Feature Set):
- * - 8-bit data width
+ * NEANDER-X 16-bit Architecture (Full Feature Set):
+ * - 16-bit native word size (int = 2 bytes)
  * - 16-bit address space (64KB via SPI SRAM)
  * - Accumulator-based architecture with index registers
+ * - Little-endian byte order
  *
  * Registers:
  * - AC (8-bit)  : Accumulator - main computation register
  * - X  (8-bit)  : Index register - array access, expression temp
  * - Y  (8-bit)  : Index register - MUL high byte, expression temp
- * - PC (16-bit) : Program counter
- * - SP (16-bit) : Stack pointer (grows downward)
+ * - PC (16-bit) : Program counter (0x0000-0xFFFF)
+ * - SP (16-bit) : Stack pointer (reset: 0x00FF, grows downward)
  * - FP (16-bit) : Frame pointer for local variable access
+ * - REM (16-bit): Memory Address Register
+ * - RDM (16-bit): Memory Data Register
  *
  * Condition Flags: N (Negative), Z (Zero), C (Carry)
  *
@@ -36,38 +39,51 @@
  * - AND/OR/XOR addr  : Bitwise operations
  * - NOT/NEG          : Complement/Negate AC
  * - SHL/SHR/ASR      : Shift operations
- * - MUL              : AC * X -> Y:AC (16-bit result)
+ * - MUL              : 16x16 -> 32-bit result (Y:AC = AC * X)
  * - DIV              : AC / X -> AC (quotient), Y (remainder)
  * - MOD              : AC % X -> AC (remainder)
  * - CMP addr         : Compare AC with memory (sets flags)
  * - INC/DEC          : Increment/Decrement AC
- * - PUSH/POP         : Stack operations
+ * - PUSH/POP         : Stack operations (16-bit values)
  * - PUSH_FP/POP_FP   : Save/restore frame pointer
  * - TSF/TFS          : Transfer SP <-> FP
- * - CALL/RET         : Subroutine call/return
+ * - CALL/RET         : Subroutine call/return (16-bit addresses)
  * - JMP/JZ/JNZ/JN    : Jump instructions
  * - JC/JNC           : Jump on carry/no carry
  * - JLE/JGT/JGE      : Signed comparison jumps
  * - JBE/JA           : Unsigned comparison jumps
  *
- * Type mapping:
- * - char:    1 byte (native)
- * - short:   1 byte (8-bit processor)
- * - int:     1 byte (8-bit native)
- * - long:    2 bytes (using ADC/SBC)
+ * Type mapping (16-bit architecture):
+ * - char:    1 byte (8-bit character)
+ * - short:   2 bytes (16-bit native)
+ * - int:     2 bytes (16-bit native)
+ * - long:    4 bytes (32-bit using ADC/SBC pairs)
  * - pointer: 2 bytes (16-bit address space)
  * - float:   not supported
  *
  * Calling convention:
- * - Arguments pushed right-to-left on stack
+ * - Arguments pushed right-to-left on stack (2-byte aligned)
  * - Return value in AC (8-bit) or Y:AC (16-bit, Y=high byte)
  * - Caller cleans up arguments
  * - FP-relative addressing for parameters and locals
  *
+ * Stack Frame Layout (16-bit):
+ *   Higher addresses
+ *   +------------------+
+ *   | Parameter N      | <- FP + 4 + 2*(N-1)
+ *   | ...              |
+ *   | Parameter 1      | <- FP + 4
+ *   | Return Address   | <- FP + 2 (16-bit)
+ *   | Old FP           | <- FP (16-bit)
+ *   | Local Variable 1 | <- FP - 2
+ *   | Local Variable 2 | <- FP - 4
+ *   +------------------+
+ *   Lower addresses    <- SP
+ *
  * Register usage strategy:
- * - AC: Primary computation, return values
+ * - AC: Primary computation, return values (low byte for 16-bit)
  * - X:  Left operand temp, array index, loop counter
- * - Y:  Right operand temp, MUL high byte, DIV remainder
+ * - Y:  Right operand temp, MUL high byte, DIV remainder, return high byte
  *
  * =============================================================================
  */
@@ -371,21 +387,31 @@ addr: ADDRGP4  "%a"
 addr: ADDRFP4  "%a"
 addr: ADDRLP4  "%a"
 
+reg: ADDRGP2  "    LDI lo(%a)\n    PUSH\n    LDI hi(%a)\n"  4
+reg: ADDRFP2  "    LDI lo(%a)\n    PUSH\n    LDI hi(%a)\n"  4
+reg: ADDRLP2  "    LDI lo(%a)\n    PUSH\n    LDI hi(%a)\n"  4
+
 reg: INDIRI1(addr)  "    LDA %0\n"  2
 reg: INDIRU1(addr)  "    LDA %0\n"  2
-reg: INDIRI4(addr)  "    LDA %0\n"  2
-reg: INDIRU4(addr)  "    LDA %0\n"  2
 
 reg: INDIRI2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRU2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 reg: INDIRP2(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n"  4
 
+reg: INDIRI4(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n    PUSH\n    LDA %0+2\n    PUSH\n    LDA %0+3\n"  8
+reg: INDIRU4(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n    PUSH\n    LDA %0+2\n    PUSH\n    LDA %0+3\n"  8
+reg: INDIRP4(addr)  "    LDA %0\n    PUSH\n    LDA %0+1\n    PUSH\n    LDA %0+2\n    PUSH\n    LDA %0+3\n"  8
+
 stmt: ASGNI1(addr,reg)  "    STA %0\n"  2
 stmt: ASGNU1(addr,reg)  "    STA %0\n"  2
 
-stmt: ASGNI2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
-stmt: ASGNU2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
-stmt: ASGNP2(addr,reg)  "    STA %0\n    POP\n    STA %0+1\n"  4
+stmt: ASGNI2(addr,reg)  "    STA %0+1\n    POP\n    STA %0\n"  4
+stmt: ASGNU2(addr,reg)  "    STA %0+1\n    POP\n    STA %0\n"  4
+stmt: ASGNP2(addr,reg)  "    STA %0+1\n    POP\n    STA %0\n"  4
+
+stmt: ASGNI4(addr,reg)  "    STA %0+3\n    POP\n    STA %0+2\n    POP\n    STA %0+1\n    POP\n    STA %0\n"  8
+stmt: ASGNU4(addr,reg)  "    STA %0+3\n    POP\n    STA %0+2\n    POP\n    STA %0+1\n    POP\n    STA %0\n"  8
+stmt: ASGNP4(addr,reg)  "    STA %0+3\n    POP\n    STA %0+2\n    POP\n    STA %0+1\n    POP\n    STA %0\n"  8
 
 reg: INDIRI1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
 reg: INDIRU1(ADDI2(addr,reg))  "    TAX\n    LDA %0,X\n"  3
@@ -443,20 +469,21 @@ addr: ADDP2(addr,reg)  "%0"  1
 reg: SUBI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
 reg: SUBU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t2_lo\n    SUB _tmp_lo\n    PUSH\n    LDA _t2_hi\n    SBC _tmp_hi\n"  15
 
-reg: ADDI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
-reg: ADDU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    ADD _tmp\n"  5
+reg: ADDI4(reg,reg)  "    STA _t2_lo\n    POP\n    STA _t2_hi\n    POP\n    STA _t3_lo\n    POP\n    STA _t3_hi\n    POP\n    STA _t4_hi\n    POP\n    STA _t4_lo+1\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t4_lo\n    ADD _t2_lo\n    PUSH\n    LDA _t4_lo+1\n    ADC _t2_hi\n    PUSH\n    LDA _t3_lo\n    ADC _t3_hi\n    PUSH\n    LDA _t4_hi\n    ADC _t3_hi\n"  25
+reg: ADDU4(reg,reg)  "    STA _t2_lo\n    POP\n    STA _t2_hi\n    POP\n    STA _t3_lo\n    POP\n    STA _t3_hi\n    POP\n    STA _t4_hi\n    POP\n    STA _t4_lo+1\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t4_lo\n    ADD _t2_lo\n    PUSH\n    LDA _t4_lo+1\n    ADC _t2_hi\n    PUSH\n    LDA _t3_lo\n    ADC _t3_hi\n    PUSH\n    LDA _t4_hi\n    ADC _t3_hi\n"  25
 
-reg: ADDI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    ADD %1\n"  2
-reg: ADDU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n"  2
-reg: ADDI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    ADD %1\n"  1
-reg: ADDU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    ADD %1\n"  1
+reg: ADDI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    ADD %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  6
+reg: ADDU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    ADD %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  6
+reg: ADDI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    ADD %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  5
+reg: ADDU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    ADD %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  5
 
-reg: SUBI4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
-reg: SUBU4(reg,reg)  "    PUSH\n    STA _tmp\n    POP\n    SUB _tmp\n"  5
-reg: SUBI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    SUB %1\n"  2
-reg: SUBU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n"  2
-reg: SUBI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    SUB %1\n"  1
-reg: SUBU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    SUB %1\n"  1
+reg: SUBI4(reg,reg)  "    STA _t2_lo\n    POP\n    STA _t2_hi\n    POP\n    STA _t3_lo\n    POP\n    STA _t3_hi\n    POP\n    STA _t4_hi\n    POP\n    STA _t4_lo+1\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t4_lo\n    SUB _t2_lo\n    PUSH\n    LDA _t4_lo+1\n    SBC _t2_hi\n    PUSH\n    LDA _t3_lo\n    SBC _t3_hi\n    PUSH\n    LDA _t4_hi\n    SBC _t3_hi\n"  25
+reg: SUBU4(reg,reg)  "    STA _t2_lo\n    POP\n    STA _t2_hi\n    POP\n    STA _t3_lo\n    POP\n    STA _t3_hi\n    POP\n    STA _t4_hi\n    POP\n    STA _t4_lo+1\n    POP\n    LDI 0\n    ADD _zero\n    LDA _t4_lo\n    SUB _t2_lo\n    PUSH\n    LDA _t4_lo+1\n    SBC _t2_hi\n    PUSH\n    LDA _t3_lo\n    SBC _t3_hi\n    PUSH\n    LDA _t4_hi\n    SBC _t3_hi\n"  25
+
+reg: SUBI4(CVII4(INDIRI1(addr)),CVII4(INDIRI1(addr)))  "    LDA %0\n    SUB %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  6
+reg: SUBU4(CVUI4(INDIRU1(addr)),CVUI4(INDIRU1(addr)))  "    LDA %0\n    SUB %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  6
+reg: SUBI4(CVII4(reg),CVII4(INDIRI1(addr)))  "    SUB %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  5
+reg: SUBU4(CVUI4(reg),CVUI4(INDIRU1(addr)))  "    SUB %1\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  5
 
 reg: MULI1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
 reg: MULU1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
@@ -497,6 +524,29 @@ reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  1
 reg: BCOMI1(reg)  "    NOT\n"  1
 reg: BCOMU1(reg)  "    NOT\n"  1
 
+reg: BANDI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    AND _tmp_lo\n    PUSH\n    LDA _t2_hi\n    AND _tmp_hi\n"  12
+reg: BANDU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    AND _tmp_lo\n    PUSH\n    LDA _t2_hi\n    AND _tmp_hi\n"  12
+
+reg: BORI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    OR _tmp_lo\n    PUSH\n    LDA _t2_hi\n    OR _tmp_hi\n"  12
+reg: BORU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    OR _tmp_lo\n    PUSH\n    LDA _t2_hi\n    OR _tmp_hi\n"  12
+
+reg: BXORI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    XOR _tmp_lo\n    PUSH\n    LDA _t2_hi\n    XOR _tmp_hi\n"  12
+reg: BXORU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    XOR _tmp_lo\n    PUSH\n    LDA _t2_hi\n    XOR _tmp_hi\n"  12
+
+reg: BCOMI2(reg)  "    NOT\n    PUSH\n    POP\n    NOT\n"  4
+reg: BCOMU2(reg)  "    NOT\n    PUSH\n    POP\n    NOT\n"  4
+
+reg: MULI2(reg,reg)  "    TAX\n    POP\n    MUL\n    PUSH\n    TYA\n"  5
+reg: MULU2(reg,reg)  "    TAX\n    POP\n    MUL\n    PUSH\n    TYA\n"  5
+
+reg: DIVI2(reg,reg)  "    TAX\n    POP\n    DIV\n    PUSH\n    TYA\n"  5
+reg: DIVU2(reg,reg)  "    TAX\n    POP\n    DIV\n    PUSH\n    TYA\n"  5
+
+reg: MODI2(reg,reg)  "    TAX\n    POP\n    MOD\n    PUSH\n    TYA\n"  5
+reg: MODU2(reg,reg)  "    TAX\n    POP\n    MOD\n    PUSH\n    TYA\n"  5
+
+reg: NEGI2(reg)  "    NOT\n    PUSH\n    POP\n    NOT\n    LDI 1\n    PUSH\n    LDI 0\n    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    ADD _tmp_lo\n    PUSH\n    LDA _t2_hi\n    ADC _tmp_hi\n"  20
+
 reg: LSHI1(reg,conN)  "    SHL\n"  1
 reg: LSHU1(reg,conN)  "    SHL\n"  1
 
@@ -525,12 +575,12 @@ reg: CVUU1(INDIRU2(addr))  "    LDA %0\n"  2
 reg: CVPU2(reg)  "# cvpu2\n"  0
 reg: CVUP2(reg)  "# cvup2\n"  0
 
-reg: CVII4(reg)  "# cvii4 - extend to 4 byte\n"  0
-reg: CVIU4(reg)  "# cviu4\n"  0
-reg: CVUI4(reg)  "# cvui4\n"  0
-reg: CVUU4(reg)  "# cvuu4\n"  0
-reg: CVPU4(reg)  "# cvpu4\n"  0
-reg: CVUP4(reg)  "# cvup4\n"  0
+reg: CVII4(reg)  "    TAY\n    LDI 0\n    TYA\n    JN _sx4_%a\n    LDI 0\n    PUSH\n    LDI 0\n    JMP _sx4d_%a\n_sx4_%a:\n    LDI 0xFF\n    PUSH\n    LDI 0xFF\n_sx4d_%a:\n"  10
+reg: CVIU4(reg)  "    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  4
+reg: CVUI4(reg)  "    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  4
+reg: CVUU4(reg)  "    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  4
+reg: CVPU4(reg)  "    PUSH\n    LDI 0\n    PUSH\n    LDI 0\n"  4
+reg: CVUP4(reg)  "# cvup4 - truncate to pointer\n"  0
 
 stmt: LABELV  "%a:\n"
 
@@ -573,12 +623,34 @@ stmt: GEI1(reg,INDIRI1(addr))  "    CMP %1\n    JGE %a\n"  3
 stmt: GEU1(reg,reg)  "    TAX\n    POP\n    STA _tmp\n    TXA\n    CMP _tmp\n    JNC %a\n"  5
 stmt: GEU1(reg,INDIRU1(addr))  "    CMP %1\n    JNC %a\n"  3
 
+stmt: EQI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    CMP _tmp_lo\n    JNZ _neq_%a\n    LDA _t2_hi\n    CMP _tmp_hi\n    JZ %a\n_neq_%a:\n"  15
+stmt: EQU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    CMP _tmp_lo\n    JNZ _neq_%a\n    LDA _t2_hi\n    CMP _tmp_hi\n    JZ %a\n_neq_%a:\n"  15
+
+stmt: NEI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    CMP _tmp_lo\n    JNZ %a\n    LDA _t2_hi\n    CMP _tmp_hi\n    JNZ %a\n"  15
+stmt: NEU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    CMP _tmp_lo\n    JNZ %a\n    LDA _t2_hi\n    CMP _tmp_hi\n    JNZ %a\n"  15
+
+stmt: LTI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _t2_hi\n    CMP _tmp_hi\n    JN %a\n    JNZ _nlt_%a\n    LDA _t2_lo\n    CMP _tmp_lo\n    JC %a\n_nlt_%a:\n"  20
+stmt: LTU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _t2_hi\n    CMP _tmp_hi\n    JC %a\n    JNZ _nlt_%a\n    LDA _t2_lo\n    CMP _tmp_lo\n    JC %a\n_nlt_%a:\n"  20
+
+stmt: LEI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _t2_hi\n    CMP _tmp_hi\n    JN %a\n    JNZ _nle_%a\n    LDA _t2_lo\n    CMP _tmp_lo\n    JBE %a\n_nle_%a:\n"  20
+stmt: LEU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _t2_hi\n    CMP _tmp_hi\n    JC %a\n    JNZ _nle_%a\n    LDA _t2_lo\n    CMP _tmp_lo\n    JBE %a\n_nle_%a:\n"  20
+
+stmt: GTI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _tmp_hi\n    CMP _t2_hi\n    JN %a\n    JNZ _ngt_%a\n    LDA _tmp_lo\n    CMP _t2_lo\n    JC %a\n_ngt_%a:\n"  20
+stmt: GTU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _tmp_hi\n    CMP _t2_hi\n    JC %a\n    JNZ _ngt_%a\n    LDA _tmp_lo\n    CMP _t2_lo\n    JC %a\n_ngt_%a:\n"  20
+
+stmt: GEI2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _tmp_hi\n    CMP _t2_hi\n    JN %a\n    JNZ _nge_%a\n    LDA _tmp_lo\n    CMP _t2_lo\n    JBE %a\n_nge_%a:\n"  20
+stmt: GEU2(reg,reg)  "    STA _tmp_lo\n    POP\n    STA _tmp_hi\n    POP\n    STA _t2_hi\n    POP\n    STA _t2_lo\n    LDA _tmp_hi\n    CMP _t2_hi\n    JC %a\n    JNZ _nge_%a\n    LDA _tmp_lo\n    CMP _t2_lo\n    JBE %a\n_nge_%a:\n"  20
+
 stmt: ARGI1(reg)  "    PUSH\n"  1
 stmt: ARGU1(reg)  "    PUSH\n"  1
 
-stmt: ARGI2(reg)  "    PUSH\n"  2
-stmt: ARGU2(reg)  "    PUSH\n"  2
-stmt: ARGP2(reg)  "    PUSH\n"  2
+stmt: ARGI2(reg)  "    PUSH\n    POP\n    PUSH\n    PUSH\n"  2
+stmt: ARGU2(reg)  "    PUSH\n    POP\n    PUSH\n    PUSH\n"  2
+stmt: ARGP2(reg)  "    PUSH\n    POP\n    PUSH\n    PUSH\n"  2
+
+stmt: ARGI4(reg)  "    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    PUSH\n"  4
+stmt: ARGU4(reg)  "    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    PUSH\n"  4
+stmt: ARGP4(reg)  "    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    POP\n    PUSH\n    PUSH\n"  4
 
 reg: CALLI1(addr)  "    CALL %0\n"  5
 reg: CALLU1(addr)  "    CALL %0\n"  5
@@ -586,6 +658,10 @@ reg: CALLU1(addr)  "    CALL %0\n"  5
 reg: CALLI2(addr)  "    CALL %0\n    PUSH\n    TYA\n"  6
 reg: CALLU2(addr)  "    CALL %0\n    PUSH\n    TYA\n"  6
 reg: CALLP2(addr)  "    CALL %0\n    PUSH\n    TYA\n"  6
+
+reg: CALLI4(addr)  "    CALL %0\n    ; 32-bit return value setup\n"  8
+reg: CALLU4(addr)  "    CALL %0\n    ; 32-bit return value setup\n"  8
+reg: CALLP4(addr)  "    CALL %0\n    ; 32-bit return value setup\n"  8
 
 stmt: CALLV(addr)  "    CALL %0\n"  5
 
@@ -642,20 +718,24 @@ static void progbeg(int argc, char *argv[]) {
     tmask[IREG] = 0x07;
     vmask[IREG] = 0;
 
-    print("; NEANDER-X Assembly\n");
-    print("; Generated by LCC\n");
+    print("; NEANDER-X 16-bit Assembly\n");
+    print("; Generated by LCC (16-bit target)\n");
     print("\n");
     print("; Runtime variables (page zero for fast access)\n");
     print("    .org 0x0000\n");
-    print("_tmp:    .byte 0     ; General purpose temp\n");
-    print("_tmp2:   .byte 0     ; Second temp for binary ops\n");
+    print("_tmp:    .word 0     ; General purpose 16-bit temp\n");
+    print("_tmp2:   .word 0     ; Second 16-bit temp for binary ops\n");
     print("_tmp_lo: .byte 0     ; 16-bit temp low byte\n");
     print("_tmp_hi: .byte 0     ; 16-bit temp high byte\n");
     print("_t2_lo:  .byte 0     ; Second 16-bit temp low\n");
     print("_t2_hi:  .byte 0     ; Second 16-bit temp high\n");
+    print("_t3_lo:  .byte 0     ; Third 16-bit temp low (for 32-bit ops)\n");
+    print("_t3_hi:  .byte 0     ; Third 16-bit temp high\n");
+    print("_t4_lo:  .byte 0     ; Fourth 16-bit temp low (for 32-bit ops)\n");
+    print("_t4_hi:  .byte 0     ; Fourth 16-bit temp high\n");
     print("_zero:   .byte 0     ; Constant zero (for clearing carry)\n");
     print("\n");
-    print("; Code section\n");
+    print("; Code section starts at 0x0100 (page 0 reserved for stack)\n");
     print("    .org 0x0100\n");
     print("\n");
 }
@@ -705,8 +785,16 @@ static void defconst(int suffix, int size, Value v) {
         print("    .byte %d\n", v.u & 0xFF);
         break;
     case 2:
+        /* 16-bit value in little-endian */
         print("    .byte %d\n", v.u & 0xFF);
         print("    .byte %d\n", (v.u >> 8) & 0xFF);
+        break;
+    case 4:
+        /* 32-bit value in little-endian (for long type) */
+        print("    .byte %d\n", v.u & 0xFF);
+        print("    .byte %d\n", (v.u >> 8) & 0xFF);
+        print("    .byte %d\n", (v.u >> 16) & 0xFF);
+        print("    .byte %d\n", (v.u >> 24) & 0xFF);
         break;
     default:
         assert(0);
@@ -741,7 +829,8 @@ static void space(int n) {
 }
 
 static void local(Symbol p) {
-    offset = roundup(offset + p->type->size, p->type->align);
+    /* Ensure 2-byte alignment for 16-bit architecture */
+    offset = roundup(offset + p->type->size, p->type->align < 2 ? 2 : p->type->align);
     p->x.offset = -offset;
     p->x.name = stringf("%d", -offset);
 }
@@ -760,6 +849,7 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     usedmask[IREG] = 0;
     freemask[IREG] = tmask[IREG];
 
+    /* Parameters start at FP+4 (after saved FP and return address, both 16-bit) */
     param_offset = 4;
     for (i = 0; callee[i]; i++) {
         Symbol p = callee[i];
@@ -767,7 +857,8 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
         p->x.offset = q->x.offset = param_offset;
         p->x.name = q->x.name = stringf("%d", param_offset);
         p->sclass = q->sclass = AUTO;
-        param_offset += roundup(q->type->size, 1);
+        /* 2-byte alignment for 16-bit architecture */
+        param_offset += roundup(q->type->size, 2);
     }
 
     offset = maxoffset = 0;
@@ -816,16 +907,16 @@ static void clobber(Node p) {
 }
 
 Interface neanderxIR = {
-    1, 1, 0,
-    1, 1, 0,
-    1, 1, 0,
-    2, 1, 0,
-    2, 1, 0,
-    0, 1, 1,
-    0, 1, 1,
-    0, 1, 1,
-    2, 1, 0,
-    0, 1, 0,
+    1, 1, 0,  /* char:        1 byte, 1-byte align */
+    2, 2, 0,  /* short:       2 bytes, 2-byte align (16-bit native) */
+    2, 2, 0,  /* int:         2 bytes, 2-byte align (16-bit native) */
+    4, 2, 0,  /* long:        4 bytes, 2-byte align (32-bit) */
+    4, 2, 0,  /* long long:   4 bytes, 2-byte align (32-bit) */
+    0, 1, 1,  /* float:       not supported */
+    0, 1, 1,  /* double:      not supported */
+    0, 1, 1,  /* long double: not supported */
+    2, 2, 0,  /* pointer:     2 bytes, 2-byte align (16-bit address) */
+    0, 2, 0,  /* struct:      2-byte alignment */
 
     1,
     0,

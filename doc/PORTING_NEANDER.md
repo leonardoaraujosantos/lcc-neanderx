@@ -1,6 +1,8 @@
 # Porting LCC to the NEANDER-X Processor: A Complete Tutorial
 
-This document provides a comprehensive, step-by-step guide to porting the LCC (Little C Compiler) to the NEANDER-X 8-bit educational processor. Whether you're a student learning about compilers or a hobbyist building your own CPU, this tutorial will walk you through the entire process.
+This document provides a comprehensive, step-by-step guide to porting the LCC (Little C Compiler) to the NEANDER-X 16-bit educational processor. Whether you're a student learning about compilers or a hobbyist building your own CPU, this tutorial will walk you through the entire process.
+
+**Note:** This guide has been updated for the 16-bit version of NEANDER-X where `int` is 2 bytes (16-bit native) and `long` is 4 bytes (32-bit).
 
 ## Table of Contents
 
@@ -25,7 +27,7 @@ This document provides a comprehensive, step-by-step guide to porting the LCC (L
 
 ## Introduction
 
-LCC is a retargetable ANSI C compiler originally developed by Chris Fraser and David Hanson. "Retargetable" means you can adapt it to generate code for different processor architectures by writing a new backend. This tutorial documents the process of creating a backend for the NEANDER-X, an 8-bit educational processor.
+LCC is a retargetable ANSI C compiler originally developed by Chris Fraser and David Hanson. "Retargetable" means you can adapt it to generate code for different processor architectures by writing a new backend. This tutorial documents the process of creating a backend for the NEANDER-X, a 16-bit educational processor with 8-bit data registers and 16-bit address space.
 
 ### Why Port LCC?
 
@@ -195,12 +197,15 @@ DECJNZ addr     ; AC = AC - 1; if AC != 0: jump to addr
 | DEX/DEY | `for` loops | Efficient loop counters |
 | SWPX | `b - a` | Operand reordering without temps |
 
-### Memory Model
+### Memory Model (16-bit Architecture)
 
 - 16-bit address space (64KB via SPI SRAM)
-- 8-bit data bus
+- 8-bit data bus (16-bit values require 2 memory accesses)
 - Stack grows downward (SP decrements on push)
 - Little-endian byte order
+- Stack pointer starts at 0x00FF, grows toward 0x0000
+- Code/data starts at 0x0100
+- Native word size: 16-bit (int = 2 bytes)
 
 ### Why NEANDER-X is Good for C Compilation
 
@@ -222,11 +227,12 @@ Unlike the original NEANDER (which only had AC), NEANDER-X was specifically exte
 11. **Swap Instructions**: SWPX/SWPY for operand reordering without temporaries
 12. **DEX/DEY**: Direct decrement for loop counters
 
-### Remaining Challenges
+### Remaining Challenges (16-bit Architecture)
 
-1. **C Type Promotion**: C promotes `char` to `int` for arithmetic - the backend must handle this
+1. **8-bit Data Registers**: AC, X, Y are 8-bit; 16-bit operations require multi-byte sequences
 2. **Complex Expressions**: While much improved with reg-to-reg ops, some expressions still need temps
-3. **8-bit Native Width**: 16/32-bit operations require multiple instructions
+3. **32-bit Operations**: long arithmetic requires 4-byte carry/borrow chains
+4. **Memory Overhead**: Each 16-bit memory access requires 2 SPI transactions
 
 ---
 
@@ -1128,16 +1134,16 @@ The Interface structure defines your backend's configuration:
 ```c
 Interface neanderxIR = {
     /* Type metrics: {size, align, outofline} */
-    1, 1, 0,    /* char */
-    1, 1, 0,    /* short */
-    1, 1, 0,    /* int - 8-bit for NEANDER-X */
-    2, 1, 0,    /* long - 16-bit */
-    2, 1, 0,    /* long long */
-    0, 1, 1,    /* float - not supported */
-    0, 1, 1,    /* double - not supported */
-    0, 1, 1,    /* long double - not supported */
-    2, 1, 0,    /* pointer - 16-bit */
-    0, 1, 0,    /* struct */
+    1, 1, 0,    /* char:        1 byte, 1-byte align */
+    2, 2, 0,    /* short:       2 bytes, 2-byte align (16-bit native) */
+    2, 2, 0,    /* int:         2 bytes, 2-byte align (16-bit native) */
+    4, 2, 0,    /* long:        4 bytes, 2-byte align (32-bit) */
+    4, 2, 0,    /* long long:   4 bytes, 2-byte align (32-bit) */
+    0, 1, 1,    /* float:       not supported */
+    0, 1, 1,    /* double:      not supported */
+    0, 1, 1,    /* long double: not supported */
+    2, 2, 0,    /* pointer:     2 bytes, 2-byte align (16-bit address) */
+    0, 2, 0,    /* struct:      2-byte alignment */
 
     /* Flags */
     1,          /* little_endian */

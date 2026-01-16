@@ -1,16 +1,22 @@
-/* NEANDER-X 8-bit processor backend driver configuration */
+/* NEANDER-X 16-bit processor backend driver configuration */
 
 #include <string.h>
 
-static char rcsid[] = "$Id: neanderx.c $";
+static char rcsid[] = "$Id: neanderx.c - 16-bit version $";
 
 #ifndef LCCDIR
 #define LCCDIR "/usr/local/lib/lcc/"
 #endif
 
 /*
- * NEANDER-X is an educational 8-bit processor.
+ * NEANDER-X is an educational 16-bit processor.
  * This driver configuration generates NEANDER-X assembly output.
+ *
+ * 16-bit Architecture Features:
+ * - 16-bit native word size (int = 2 bytes)
+ * - 16-bit address space (64KB via SPI SRAM)
+ * - 32-bit long type for extended arithmetic
+ * - Little-endian byte order
  *
  * The output is assembly code that can be:
  * 1. Assembled by a custom NEANDER-X assembler
@@ -28,7 +34,8 @@ char inputs[256] = "";
 char *cpp[] = {
     LCCDIR "cpp",
     "-D__NEANDERX__",
-    "-D__8BIT__",
+    "-D__16BIT__",
+    "-D__NEANDERX16__",
     "-D__STDC__=1",
     "$1", "$2", "$3", 0
 };
