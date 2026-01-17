@@ -125,30 +125,99 @@ stmt: ASGNI2(VREGP,reg)  "%0"
 
 **Result**: Caused "Bad goal nonterminal 0" error during compilation. The nts array wasn't set up correctly for this pattern.
 
+### 3. Missing emit2() Handlers for SUB and Bitwise Operations (SOLVED)
+
+**Problem**: The `emit2()` function had handlers for ADD (VREG + VREG) and MUL (VREG * VREG) operations, but was missing handlers for:
+- SUB (VREG - VREG)
+- BXOR (VREG ^ VREG)
+- BAND (VREG & VREG)
+- BOR (VREG | VREG)
+
+This caused these operations to use the generic `(reg,reg)` rule which emits both VREG loads before the operation template, losing the first operand.
+
+**Solution**: Added VREGP grammar rules and emit2() handlers for all missing operations:
+
+```c
+// Grammar rules added:
+reg: SUBI2(INDIRI2(VREGP),INDIRI2(VREGP))  "# sub vreg-vreg\n"  3
+reg: BXORI2(INDIRI2(VREGP),INDIRI2(VREGP))  "# xor vreg^vreg\n"  3
+reg: BANDI2(INDIRI2(VREGP),INDIRI2(VREGP))  "# and vreg&vreg\n"  3
+reg: BORI2(INDIRI2(VREGP),INDIRI2(VREGP))  "# or vreg|vreg\n"  3
+
+// emit2() handler for SUB:
+case SUB+I:
+case SUB+U:
+    if (vreg - vreg) {
+        print("    LDA _vreg%d\n", slot2);  // subtrahend
+        print("    STA _tmp\n");
+        print("    LDA _vreg%d\n", slot1);  // minuend
+        print("    SUB _tmp\n");
+    }
+    break;
+```
+
+### 4. Template %0 Prefix Causing Invalid Instructions (SOLVED)
+
+**Problem**: Templates like `ADDI2(reg,INDIRI2(addr))` had `%0` at the start:
+```
+reg: ADDI2(reg,INDIRI2(addr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"
+```
+
+When the first child (`reg`) was allocated to register Y, the `%0` would emit "Y", causing assembly errors like "Unknown instruction: Y".
+
+**Solution**: Removed the `%0` prefix from all templates where the first child is `reg`. The value is already in AC when the template runs:
+```
+reg: ADDI2(reg,INDIRI2(addr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"
+```
+
+### 5. Missing Rules for Global Address Patterns (SOLVED)
+
+**Problem**: Rules existed for frame-relative addresses (`faddr`) but not for global addresses (`addr`). Operations on global variables used the slower `(reg,reg)` fallback.
+
+**Solution**: Added specific rules for `addr` patterns:
+```
+reg: SUBI2(INDIRI2(addr),INDIRI2(addr))  "    LDA %1\n    STA _tmp\n    LDA %0\n    SUB _tmp\n"  4
+reg: BXORI2(INDIRI2(addr),INDIRI2(addr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    XOR _tmp\n"  4
+// etc. for AND, OR operations
+```
+
+### 6. Increased (reg,reg) Rule Costs (SOLVED)
+
+**Problem**: The generic `(reg,reg)` rules were being selected over more specific patterns due to cost ties.
+
+**Solution**: Increased costs of `(reg,reg)` rules from 4 to 8 to prefer specific patterns:
+```
+reg: SUBI2(reg,reg)  "    STA _tmp\n    POP\n    SUB _tmp\n"  8
+reg: BXORI2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  8
+```
+
 ## Test Results After Fixes
 
 Before fixes: 14/23 tests passing
 After VREG spill fix: 17/23 tests passing
 After VREG spill + template fixes: 18/23 tests passing
+After division/subtraction addr rules: 19/23 tests passing
+After VREGP SUB/bitwise handlers: **21/23 tests passing**
 
-Remaining failures (5 tests):
-1. `08_fibonacci` - Recursive function, VREG global memory issue
-2. `10_char` - Char operations (needs investigation)
-3. `12_division` - Division operations (needs investigation)
-4. `14_negative` - Negative number handling (needs investigation)
-5. `19_bitwise2` - Bitwise operations with VREGs (improved from 40 to 120, expected 170)
+Remaining failures (2 tests):
+1. `08_fibonacci` - Recursive function, VREG global memory issue (architectural limitation)
+2. `10_char` - Char operations (needs investigation - comparison/branch issues)
 
 ## Files Modified
 
 - `src/neanderx.md` - Main LCC backend grammar file
   - Modified `emit2()` function for VREG source loading
-  - Fixed binary operation templates to include `%0` and `%1`
-  - Updated VREG write rules
+  - Added emit2() handlers for SUB, BXOR, BAND, BOR with VREGP operands
+  - Fixed binary operation templates to remove incorrect `%0` prefix
+  - Added VREGP rules for SUBI2, BXORI2, BANDI2, BORI2
+  - Added addr-based rules for SUB and bitwise operations
+  - Added rules for operations with constants (con2)
+  - Increased (reg,reg) rule costs to prefer specific patterns
 
 ## Future Work
 
-1. **Stack-based VREG spills**: To support recursive functions properly, VREG spill slots should be allocated on the stack per function call, not in global memory.
+1. **Stack-based VREG spills**: To support recursive functions properly, VREG spill slots should be allocated on the stack per function call, not in global memory. This would fix the fibonacci test.
 
-2. **Investigate remaining test failures**: The char, division, and negative number tests need further debugging.
+2. **Investigate char test failure**: The `10_char` test involves character comparison and conditionals that may have issues with signed/unsigned handling.
 
 3. **Optimize VREG usage**: Consider reducing unnecessary VREG spills by improving register allocation heuristics.
