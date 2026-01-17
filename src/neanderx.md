@@ -89,6 +89,7 @@
  */
 
 #include "c.h"
+#include <string.h>
 
 #define NODEPTR_TYPE Node
 #define OP_LABEL(p) ((p)->op)
@@ -392,6 +393,7 @@ stmt: ASGNI4(VREGP,reg)  "# write vreg\n"
 stmt: ASGNU4(VREGP,reg)  "# write vreg\n"
 stmt: ASGNP4(VREGP,reg)  "# write vreg\n"
 
+
 con1: CNSTI1  "%a"
 con1: CNSTU1  "%a"
 
@@ -522,19 +524,19 @@ reg: ADDU2(INDIRU2(addr),con2)  "    LDA %0\n    STA _tmp\n    LDI %1\n    ADD _
 reg: ADDI2(INDIRI2(addr),INDIRI2(addr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
 reg: ADDU2(INDIRU2(addr),INDIRU2(addr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
 
-reg: ADDI2(reg,INDIRI2(addr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
-reg: ADDU2(reg,INDIRU2(addr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
+reg: ADDI2(reg,INDIRI2(addr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
+reg: ADDU2(reg,INDIRU2(addr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
 
-reg: ADDI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
-reg: ADDU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
-reg: ADDP2(reg,INDIRP2(faddr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
+reg: ADDI2(reg,INDIRI2(faddr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
+reg: ADDU2(reg,INDIRU2(faddr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
+reg: ADDP2(reg,INDIRP2(faddr))  "%0    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
 
-reg: ADDI2(reg,con2)  "    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
-reg: ADDU2(reg,con2)  "    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
+reg: ADDI2(reg,con2)  "%0    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
+reg: ADDU2(reg,con2)  "%0    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
 
-reg: ADDI2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  10
-reg: ADDU2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  10
-reg: ADDP2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  10
+reg: ADDI2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  10
+reg: ADDU2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  10
+reg: ADDP2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  10
 addr: ADDP2(addr,reg)  "%0"  1
 
 reg: SUBI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    SUB _tmp\n"  3
@@ -546,14 +548,14 @@ reg: SUBU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %1\n    STA _tmp\n    LDA %0
 reg: SUBI2(INDIRI2(addr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    SUB _tmp\n"  3
 reg: SUBU2(INDIRU2(addr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    SUB _tmp\n"  3
 
-reg: SUBI2(reg,INDIRI2(faddr))  "    STA _tmp2\n    LDA %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  5
-reg: SUBU2(reg,INDIRU2(faddr))  "    STA _tmp2\n    LDA %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  5
+reg: SUBI2(reg,INDIRI2(faddr))  "%0    STA _tmp2\n    LDA %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  5
+reg: SUBU2(reg,INDIRU2(faddr))  "%0    STA _tmp2\n    LDA %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  5
 
-reg: SUBI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  4
-reg: SUBU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  4
+reg: SUBI2(reg,con2)  "%0    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  4
+reg: SUBU2(reg,con2)  "%0    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  4
 
-reg: SUBI2(reg,reg)  "    STA _tmp\n    POP\n    SUB _tmp\n"  10
-reg: SUBU2(reg,reg)  "    STA _tmp\n    POP\n    SUB _tmp\n"  10
+reg: SUBI2(reg,reg)  "%0    STA _tmp2\n%1    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  10
+reg: SUBU2(reg,reg)  "%0    STA _tmp2\n%1    STA _tmp\n    LDA _tmp2\n    SUB _tmp\n"  10
 
 reg: NEGI2(reg)  "    NEG\n"  1
 
@@ -563,23 +565,23 @@ reg: ADDU4(reg,reg)  "    STA _tmp\n    POP\n    STA _tmp_hi\n    POP\n    STA _
 reg: SUBI4(reg,reg)  "    STA _tmp\n    POP\n    STA _tmp_hi\n    POP\n    STA _tmp2_hi\n    POP\n    SUB _tmp\n    PUSH\n    LDA _tmp2_hi\n    SBC _tmp_hi\n"  10
 reg: SUBU4(reg,reg)  "    STA _tmp\n    POP\n    STA _tmp_hi\n    POP\n    STA _tmp2_hi\n    POP\n    SUB _tmp\n    PUSH\n    LDA _tmp2_hi\n    SBC _tmp_hi\n"  10
 
-reg: MULI1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
-reg: MULU1(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
+reg: MULI1(reg,reg)  "%1    TAX\n%0    MUL\n"  3
+reg: MULU1(reg,reg)  "%1    TAX\n%0    MUL\n"  3
 
-reg: MULI2(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
-reg: MULU2(reg,reg)  "    TAX\n    POP\n    MUL\n"  3
+reg: MULI2(reg,reg)  "%1    TAX\n%0    MUL\n"  3
+reg: MULU2(reg,reg)  "%1    TAX\n%0    MUL\n"  3
 
-reg: DIVI1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
-reg: DIVU1(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
+reg: DIVI1(reg,reg)  "%1    TAX\n%0    DIV\n"  3
+reg: DIVU1(reg,reg)  "%1    TAX\n%0    DIV\n"  3
 
-reg: DIVI2(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
-reg: DIVU2(reg,reg)  "    TAX\n    POP\n    DIV\n"  3
+reg: DIVI2(reg,reg)  "%1    TAX\n%0    DIV\n"  3
+reg: DIVU2(reg,reg)  "%1    TAX\n%0    DIV\n"  3
 
-reg: MODI1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
-reg: MODU1(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
+reg: MODI1(reg,reg)  "%1    TAX\n%0    MOD\n"  3
+reg: MODU1(reg,reg)  "%1    TAX\n%0    MOD\n"  3
 
-reg: MODI2(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
-reg: MODU2(reg,reg)  "    TAX\n    POP\n    MOD\n"  3
+reg: MODI2(reg,reg)  "%1    TAX\n%0    MOD\n"  3
+reg: MODU2(reg,reg)  "%1    TAX\n%0    MOD\n"  3
 
 reg: BANDI1(INDIRI1(addr),INDIRI1(addr))  "    LDA %0\n    AND %1\n"  2
 reg: BANDU1(INDIRU1(addr),INDIRU1(addr))  "    LDA %0\n    AND %1\n"  2
@@ -611,32 +613,32 @@ reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  1
 reg: BCOMI1(reg)  "    NOT\n"  1
 reg: BCOMU1(reg)  "    NOT\n"  1
 
-reg: BANDI2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  10
-reg: BANDU2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  10
+reg: BANDI2(reg,reg)  "%0    STA _tmp\n%1    AND _tmp\n"  10
+reg: BANDU2(reg,reg)  "%0    STA _tmp\n%1    AND _tmp\n"  10
 
 reg: BANDI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    AND _tmp\n"  2
 reg: BANDU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    AND _tmp\n"  2
 
-reg: BANDI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
-reg: BANDU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
+reg: BANDI2(reg,INDIRI2(faddr))  "%0    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
+reg: BANDU2(reg,INDIRU2(faddr))  "%0    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
 
-reg: BORI2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  10
-reg: BORU2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  10
+reg: BORI2(reg,reg)  "%0    STA _tmp\n%1    OR _tmp\n"  10
+reg: BORU2(reg,reg)  "%0    STA _tmp\n%1    OR _tmp\n"  10
 
 reg: BORI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    OR _tmp\n"  2
 reg: BORU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    OR _tmp\n"  2
 
-reg: BORI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
-reg: BORU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
+reg: BORI2(reg,INDIRI2(faddr))  "%0    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
+reg: BORU2(reg,INDIRU2(faddr))  "%0    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
 
-reg: BXORI2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  10
-reg: BXORU2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  10
+reg: BXORI2(reg,reg)  "%0    STA _tmp\n%1    XOR _tmp\n"  10
+reg: BXORU2(reg,reg)  "%0    STA _tmp\n%1    XOR _tmp\n"  10
 
 reg: BXORI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    XOR _tmp\n"  2
 reg: BXORU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    XOR _tmp\n"  2
 
-reg: BXORI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
-reg: BXORU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
+reg: BXORI2(reg,INDIRI2(faddr))  "%0    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
+reg: BXORU2(reg,INDIRU2(faddr))  "%0    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
 
 reg: BCOMI2(reg)  "    NOT\n"  1
 reg: BCOMU2(reg)  "    NOT\n"  1
@@ -1063,29 +1065,54 @@ static void emit2(Node p) {
     int slot, slot1, slot2;
     Node left, right;
 
+    /* VREG terminal opcode = 711 */
+    #define VREG_OP 711
+    #define IS_VREG_NODE(n) ((n) && (n)->op == VREG_OP)
+
     switch (op) {
     case ASGN+I:
     case ASGN+U:
     case ASGN+P:
-        /* Write to VREG - store to dedicated memory slot */
-        if (LEFT_CHILD(p) && LEFT_CHILD(p)->op == VREG+P) {
+        /* Write to VREG - need to load source value first, then store */
+        if (IS_VREG_NODE(LEFT_CHILD(p))) {
             reg = LEFT_CHILD(p)->syms[0];
-            if (reg) {
-                slot = get_vreg_slot(reg);
-                print("    STA _vreg%d\n", slot);
+            slot = get_vreg_slot(reg);
+            right = RIGHT_CHILD(p);
+
+            /* Check source type and emit appropriate load */
+            if (right) {
+                int right_op = generic(right->op);
+                /* If source is INDIR (memory load), emit LDA */
+                if (right_op == INDIR) {
+                    Node addr = LEFT_CHILD(right);
+                    if (addr) {
+                        int addr_op = specific(addr->op);
+                        /* ADDRFP2 = 2327 & 0x3FF = 279, but check generic ADDRF */
+                        if (generic(addr->op) == ADDRF) {
+                            /* Load from frame pointer relative address */
+                            print("    LDA %d,FP\n", addr->syms[0]->x.offset);
+                        } else if (generic(addr->op) == ADDRL) {
+                            /* Load from local variable */
+                            print("    LDA %d,FP\n", addr->syms[0]->x.offset);
+                        } else if (generic(addr->op) == ADDRG) {
+                            /* Load from global */
+                            print("    LDA %s\n", addr->syms[0]->x.name);
+                        }
+                    }
+                }
+                /* If source is already a VREG read, it's handled by INDIR case in emit2 */
             }
+            print("    STA _vreg%d\n", slot);
         }
         break;
     case INDIR+I:
     case INDIR+U:
     case INDIR+P:
         /* Read from VREG - load from dedicated memory slot */
-        if (LEFT_CHILD(p) && LEFT_CHILD(p)->op == VREG+P) {
+        if (IS_VREG_NODE(LEFT_CHILD(p))) {
             reg = LEFT_CHILD(p)->syms[0];
-            if (reg) {
-                slot = get_vreg_slot(reg);
-                print("    LDA _vreg%d\n", slot);
-            }
+            slot = get_vreg_slot(reg);
+            print("    LDA _vreg%d\n", slot);
         }
         break;
     case ADD+I:
@@ -1096,10 +1123,8 @@ static void emit2(Node p) {
         right = RIGHT_CHILD(p);
         if (left && right) {
             /* Check for vreg + vreg */
-            if (generic(left->op) == INDIR && LEFT_CHILD(left) &&
-                LEFT_CHILD(left)->op == VREG+P &&
-                generic(right->op) == INDIR && LEFT_CHILD(right) &&
-                LEFT_CHILD(right)->op == VREG+P) {
+            if (generic(left->op) == INDIR && IS_VREG_NODE(LEFT_CHILD(left)) &&
+                generic(right->op) == INDIR && IS_VREG_NODE(LEFT_CHILD(right))) {
                 /* vreg + vreg: load first to temp, load second, add */
                 reg1 = LEFT_CHILD(left)->syms[0];
                 reg2 = LEFT_CHILD(right)->syms[0];
@@ -1111,8 +1136,7 @@ static void emit2(Node p) {
                 print("    ADD _tmp\n");
             }
             /* Check for vreg + const */
-            else if (generic(left->op) == INDIR && LEFT_CHILD(left) &&
-                     LEFT_CHILD(left)->op == VREG+P &&
+            else if (generic(left->op) == INDIR && IS_VREG_NODE(LEFT_CHILD(left)) &&
                      generic(right->op) == CNST) {
                 reg1 = LEFT_CHILD(left)->syms[0];
                 slot1 = get_vreg_slot(reg1);
@@ -1130,10 +1154,8 @@ static void emit2(Node p) {
         right = RIGHT_CHILD(p);
         if (left && right) {
             /* Check for vreg * vreg */
-            if (generic(left->op) == INDIR && LEFT_CHILD(left) &&
-                LEFT_CHILD(left)->op == VREG+P &&
-                generic(right->op) == INDIR && LEFT_CHILD(right) &&
-                LEFT_CHILD(right)->op == VREG+P) {
+            if (generic(left->op) == INDIR && IS_VREG_NODE(LEFT_CHILD(left)) &&
+                generic(right->op) == INDIR && IS_VREG_NODE(LEFT_CHILD(right))) {
                 /* vreg * vreg: load second to X, load first to AC, multiply */
                 reg1 = LEFT_CHILD(left)->syms[0];
                 reg2 = LEFT_CHILD(right)->syms[0];
