@@ -611,14 +611,32 @@ reg: BXORU1(reg,INDIRU1(addr))  "    XOR %1\n"  1
 reg: BCOMI1(reg)  "    NOT\n"  1
 reg: BCOMU1(reg)  "    NOT\n"  1
 
-reg: BANDI2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  3
-reg: BANDU2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  3
+reg: BANDI2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  10
+reg: BANDU2(reg,reg)  "    STA _tmp\n    POP\n    AND _tmp\n"  10
 
-reg: BORI2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  3
-reg: BORU2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  3
+reg: BANDI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    AND _tmp\n"  2
+reg: BANDU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    AND _tmp\n"  2
 
-reg: BXORI2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  3
-reg: BXORU2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  3
+reg: BANDI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
+reg: BANDU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    AND _tmp\n"  3
+
+reg: BORI2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  10
+reg: BORU2(reg,reg)  "    STA _tmp\n    POP\n    OR _tmp\n"  10
+
+reg: BORI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    OR _tmp\n"  2
+reg: BORU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    OR _tmp\n"  2
+
+reg: BORI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
+reg: BORU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    OR _tmp\n"  3
+
+reg: BXORI2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  10
+reg: BXORU2(reg,reg)  "    STA _tmp\n    POP\n    XOR _tmp\n"  10
+
+reg: BXORI2(INDIRI2(faddr),INDIRI2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    XOR _tmp\n"  2
+reg: BXORU2(INDIRU2(faddr),INDIRU2(faddr))  "    LDA %0\n    STA _tmp\n    LDA %1\n    XOR _tmp\n"  2
+
+reg: BXORI2(reg,INDIRI2(faddr))  "    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
+reg: BXORU2(reg,INDIRU2(faddr))  "    STA _tmp\n    LDA %1\n    XOR _tmp\n"  3
 
 reg: BCOMI2(reg)  "    NOT\n"  1
 reg: BCOMU2(reg)  "    NOT\n"  1
@@ -751,6 +769,36 @@ stmt: GEU2(reg,INDIRU2(faddr))  "    STA _tmp2\n    LDA %1\n    STA _tmp\n    LD
 stmt: GEI2(reg,reg)  "    STA _tmp\n    POP\n    CMP _tmp\n    JGE %a\n"  10
 stmt: GEU2(reg,reg)  "    STA _tmp\n    POP\n    CMP _tmp\n    JNC %a\n"  10
 
+stmt: LEI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JLE %a\n"  2
+stmt: LEU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JBE %a\n"  2
+stmt: LEI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JLE %a\n"  3
+stmt: LEU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JBE %a\n"  3
+
+stmt: GTI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JGT %a\n"  2
+stmt: GTU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JA %a\n"  2
+stmt: GTI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JGT %a\n"  3
+stmt: GTU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JA %a\n"  3
+
+stmt: GEI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JGE %a\n"  2
+stmt: GEU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JNC %a\n"  2
+stmt: GEI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JGE %a\n"  3
+stmt: GEU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JNC %a\n"  3
+
+stmt: LTI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JN %a\n"  2
+stmt: LTU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JC %a\n"  2
+stmt: LTI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JN %a\n"  3
+stmt: LTU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JC %a\n"  3
+
+stmt: EQI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JZ %a\n"  2
+stmt: EQU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JZ %a\n"  2
+stmt: EQI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JZ %a\n"  3
+stmt: EQU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JZ %a\n"  3
+
+stmt: NEI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JNZ %a\n"  2
+stmt: NEU2(INDIRU2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    CMP _tmp\n    JNZ %a\n"  2
+stmt: NEI2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JNZ %a\n"  3
+stmt: NEU2(reg,con2)  "    STA _tmp2\n    LDI %1\n    STA _tmp\n    LDA _tmp2\n    CMP _tmp\n    JNZ %a\n"  3
+
 stmt: ARGI1(reg)  "    PUSH\n"  1
 stmt: ARGU1(reg)  "    PUSH\n"  1
 
@@ -831,13 +879,14 @@ static void progbeg(int argc, char *argv[]) {
     print("; NEANDER-X 16-bit Assembly\n");
     print("; Generated by LCC (native 16-bit target)\n");
     print("\n");
-    print("; Code starts at 0x0000\n");
-    print("    .org 0x0000\n");
+    print("; Memory layout:\n");
+    print("; 0x0000-0x002F: Runtime variables (below stack area)\n");
+    print("; 0x0030-0x00FF: Stack (SP starts at 0x00FF, grows down)\n");
+    print("; 0x0100+: Code\n");
     print("\n");
-}
-
-static void progend(void) {
-    int i;
+    print("; Jump to startup code at 0x0100\n");
+    print("    .org 0x0000\n");
+    print("    JMP _start\n");
     print("\n");
     print("; Runtime variables\n");
     print("_tmp:     .word 0     ; General purpose 16-bit temp\n");
@@ -845,10 +894,22 @@ static void progend(void) {
     print("_tmp2:    .word 0     ; Second 16-bit temp\n");
     print("_tmp2_hi: .word 0     ; For 32-bit ops (high word)\n");
     print("_mask_ff: .word 0x00FF ; Mask for 8-bit values\n");
-    /* VREG spill slots - emit enough for all functions */
-    for (i = 0; i < 16; i++) {
-        print("_vreg%d:   .word 0     ; VREG spill slot %d\n", i, i);
+    {
+        int i;
+        for (i = 0; i < 16; i++) {
+            print("_vreg%d:   .word 0     ; VREG spill slot %d\n", i, i);
+        }
     }
+    print("\n");
+    print("; Code section at 0x0100 (above stack area)\n");
+    print("    .org 0x0100\n");
+    print("_start:\n");
+    print("    CALL _main\n");
+    print("    HLT\n");
+    print("\n");
+}
+
+static void progend(void) {
     print("\n");
     print("; End of program\n");
     print("    HLT\n");
