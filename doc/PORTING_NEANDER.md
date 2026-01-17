@@ -1690,6 +1690,84 @@ This pattern:
 
 ## Common Pitfalls and Solutions
 
+### Critical: VREG Memory Slot Management
+
+**Problem:** Virtual registers (VREGs) are used by LCC for expression temporaries. In accumulator architectures, these must be spilled to memory. A common mistake is hardcoding VREG offsets separately from local variable allocation.
+
+**Symptoms:**
+- Tests pass individually but fail when combined
+- Recursive functions produce wrong results
+- Values mysteriously get overwritten
+- Works for simple functions but fails for complex ones
+
+**Root Cause:** The `emit2()` function might use a separate offset calculation (like `VREG_OFFSET(slot)`) while `local()` allocates variables at different offsets. This causes VREGs and local variables to overlap in memory.
+
+**Example of the bug:**
+```c
+/* BAD: Using hardcoded VREG offsets */
+#define VREG_OFFSET(slot) (vreg_base_offset + (slot) * 2)
+
+static void emit2(Node p) {
+    if (LEFT_CHILD(p)->op == VREG+P) {
+        int slot = get_vreg_slot(reg);
+        print("    STA %d,FP\n", VREG_OFFSET(slot));  /* WRONG! */
+    }
+}
+```
+
+**Solution:** Use the symbol's `x.name` field which is set by `local()` with the correct offset:
+
+```c
+/* CORRECT: Use the symbol's allocated offset */
+static void emit2(Node p) {
+    if (LEFT_CHILD(p)->op == VREG+P) {
+        Symbol reg = LEFT_CHILD(p)->syms[0];
+        if (reg && reg->x.name) {
+            print("    STA %s,FP\n", reg->x.name);  /* Uses local()'s offset */
+        }
+    }
+}
+```
+
+This ensures VREGs are allocated through the same mechanism as local variables, preventing overlap.
+
+### Critical: Stack Allocation in 16-bit Mode
+
+**Problem:** When allocating stack space for local variables, the allocation loop must account for the word size.
+
+**Symptoms:**
+- Recursive functions timeout or produce wrong results
+- Stack corruption
+- Functions work but nested calls fail
+- Fibonacci, factorial, and similar recursive tests fail
+
+**Root Cause:** The stack allocation loop runs once per byte of `maxoffset`, but PUSH is a 16-bit (2-byte) operation:
+
+**Example of the bug:**
+```c
+/* BAD: Allocates double the needed space */
+if (maxoffset > 0) {
+    for (i = 0; i < maxoffset; i++) {  /* WRONG! */
+        print("    LDI 0\n");
+        print("    PUSH\n");  /* Each PUSH is 2 bytes */
+    }
+}
+```
+
+If `maxoffset = 4`, this pushes 4 times × 2 bytes = 8 bytes, causing stack corruption.
+
+**Solution:** Step by the word size (2 bytes for 16-bit):
+
+```c
+/* CORRECT: Account for 16-bit PUSH */
+if (maxoffset > 0) {
+    for (i = 0; i < maxoffset; i += 2) {  /* Step by 2 */
+        print("    LDI 0\n");
+        print("    PUSH\n");
+    }
+}
+```
+
 ### 1. "Bad terminal XXXX"
 
 **Problem:** The compiler encounters an IR operation your backend doesn't handle.
