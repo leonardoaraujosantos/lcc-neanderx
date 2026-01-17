@@ -546,9 +546,19 @@ reg: ADDP2(reg,INDIRP2(faddr))  "    STA _tmp\n    LDA %1\n    ADD _tmp\n"  3
 reg: ADDI2(reg,con2)  "    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
 reg: ADDU2(reg,con2)  "    STA _tmp\n    LDI %1\n    ADD _tmp\n"  3
 
-reg: ADDI2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  8
-reg: ADDU2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  8
-reg: ADDP2(reg,reg)  "    STA _tmp\n    POP\n    ADD _tmp\n"  8
+reg: ADDI2(CVUI2(INDIRI2(faddr)),CVUI2(INDIRI2(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDU2(CVUI2(INDIRU2(faddr)),CVUI2(INDIRU2(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVUI2(INDIRI2(addr)),CVUI2(INDIRI2(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDU2(CVUI2(INDIRU2(addr)),CVUI2(INDIRU2(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+
+reg: ADDI2(CVUI2(INDIRU1(faddr)),CVUI2(INDIRU1(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVUI2(INDIRU1(addr)),CVUI2(INDIRU1(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVII2(INDIRI1(faddr)),CVII2(INDIRI1(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVII2(INDIRI1(addr)),CVII2(INDIRI1(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+
+reg: ADDI2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  8
+reg: ADDU2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  8
+reg: ADDP2(reg,reg)  "%0    STA _tmp\n%1    ADD _tmp\n"  8
 addr: ADDP2(addr,reg)  "%0"  1
 
 reg: SUBI2(INDIRI2(faddr),con2)  "    LDI %1\n    STA _tmp\n    LDA %0\n    SUB _tmp\n"  3

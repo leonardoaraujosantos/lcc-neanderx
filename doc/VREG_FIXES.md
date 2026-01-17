@@ -197,11 +197,11 @@ Before fixes: 14/23 tests passing
 After VREG spill fix: 17/23 tests passing
 After VREG spill + template fixes: 18/23 tests passing
 After division/subtraction addr rules: 19/23 tests passing
-After VREGP SUB/bitwise handlers: **21/23 tests passing**
+After VREGP SUB/bitwise handlers: 21/23 tests passing
+After CVUI2/CVII2 char conversion rules: **22/23 tests passing**
 
-Remaining failures (2 tests):
+Remaining failures (1 test):
 1. `08_fibonacci` - Recursive function, VREG global memory issue (architectural limitation)
-2. `10_char` - Char operations (needs investigation - comparison/branch issues)
 
 ## Files Modified
 
@@ -213,11 +213,30 @@ Remaining failures (2 tests):
   - Added addr-based rules for SUB and bitwise operations
   - Added rules for operations with constants (con2)
   - Increased (reg,reg) rule costs to prefer specific patterns
+  - Added CVUI2/CVII2 rules for char-to-int promotion in ADD operations
+
+### CVUI2/CVII2 Char Promotion Fix (SOLVED)
+
+**Problem**: The `10_char` test was failing because char addition (`A + B`) generated incorrect code. The `ADDI2(reg,reg)` template with `%0` and `%1` was emitting register names (X, Y) instead of proper code.
+
+**Root Cause**: When chars are promoted to int for arithmetic, LCC generates `ADDI2(CVUI2(INDIRU1(faddr)), CVUI2(INDIRU1(faddr)))`. The CVUI2 rules reduce each operand to `reg`, and then `ADDI2(reg,reg)` matches. But the `%0` and `%1` in the template emit register names instead of instructions.
+
+**Solution**: Added specific rules to handle char promotion patterns directly:
+```
+reg: ADDI2(CVUI2(INDIRU1(faddr)),CVUI2(INDIRU1(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVUI2(INDIRU1(addr)),CVUI2(INDIRU1(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVII2(INDIRI1(faddr)),CVII2(INDIRI1(faddr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+reg: ADDI2(CVII2(INDIRI1(addr)),CVII2(INDIRI1(addr)))  "    LDA %0\n    STA _tmp\n    LDA %1\n    ADD _tmp\n"  4
+```
+
+These rules match the complete pattern and emit correct code that loads both operands and adds them.
 
 ## Future Work
 
 1. **Stack-based VREG spills**: To support recursive functions properly, VREG spill slots should be allocated on the stack per function call, not in global memory. This would fix the fibonacci test.
 
-2. **Investigate char test failure**: The `10_char` test involves character comparison and conditionals that may have issues with signed/unsigned handling.
+   **Note**: A simple caller-save approach (pushing VREGs before CALL) was attempted but failed because it interferes with argument passing - the VREGs get pushed on top of the arguments, corrupting the call stack. A proper fix requires either:
+   - Allocating VREG shadow slots in the function frame (requires knowing VREG count before code generation)
+   - Or restructuring the backend to use stack-relative VREG addressing
 
-3. **Optimize VREG usage**: Consider reducing unnecessary VREG spills by improving register allocation heuristics.
+2. **Optimize VREG usage**: Consider reducing unnecessary VREG spills by improving register allocation heuristics.
