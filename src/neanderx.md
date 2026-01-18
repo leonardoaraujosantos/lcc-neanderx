@@ -1082,9 +1082,13 @@ static void local(Symbol p) {
     p->x.name = stringf("%d", -offset);
 }
 
+/* Number of VREGs to save/restore for callee-save (for recursive function support) */
+#define CALLEE_SAVE_VREGS 4
+
 static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
     int i;
     int param_offset;
+    int save_vregs = (ncalls > 0) ? CALLEE_SAVE_VREGS : 0;
 
     /* Reset VREG slot mapping for each function */
     next_vreg_slot = 0;
@@ -1097,13 +1101,22 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
 
     print("    ; Prologue\n");
     print("    PUSH_FP\n");
+
+    /* Callee-save: preserve VREGs if function makes calls */
+    if (save_vregs > 0) {
+        print("    ; Callee-save %d VREGs\n", save_vregs);
+        for (i = 0; i < save_vregs; i++) {
+            print("    PUSH_ADDR _vreg%d\n", i);
+        }
+    }
+
     print("    TSF\n");
 
     usedmask[IREG] = 0;
     freemask[IREG] = tmask[IREG];
 
-    /* Parameters start at FP+4 (after saved FP and return address, both 16-bit) */
-    param_offset = 4;
+    /* Parameters start at FP+4 + saved_vregs*2 (after saved FP, saved VREGs, and return address) */
+    param_offset = 4 + save_vregs * 2;
     for (i = 0; callee[i]; i++) {
         Symbol p = callee[i];
         Symbol q = caller[i];
@@ -1129,6 +1142,15 @@ static void function(Symbol f, Symbol caller[], Symbol callee[], int ncalls) {
 
     print("    ; Epilogue\n");
     print("    TFS\n");
+
+    /* Callee-restore: restore VREGs in reverse order */
+    if (save_vregs > 0) {
+        print("    ; Callee-restore %d VREGs\n", save_vregs);
+        for (i = save_vregs - 1; i >= 0; i--) {
+            print("    POP_ADDR _vreg%d\n", i);
+        }
+    }
+
     print("    POP_FP\n");
     print("    RET\n");
 }
